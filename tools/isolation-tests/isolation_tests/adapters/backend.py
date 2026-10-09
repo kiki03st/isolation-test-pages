@@ -22,7 +22,7 @@ import httpx
 
 from ..config import _unique_object, _url
 from ..model import CaseSpec, Outcome, RuntimeConfig
-from .collector import HARD_RESPONSE_BYTES, CollectionError, _classify_transport
+from .collector import HARD_RESPONSE_BYTES, CollectionError
 
 
 CASE_ID = "INT-03"
@@ -79,6 +79,7 @@ def load_contract(path, allow_loopback_http: bool = False) -> dict:
         raise _blocked("backend_contract_invalid")
     valid = (
         _path_ok(data["utterance_path"], False)
+        and all(isinstance(step, str) for step in data["utterance_path"])
         and _path_ok(data["initial_callback_flag_path"], True)
         and _path_ok(data["job_id_path"], True)
         and _path_ok(data["result_evidence_path"], True)
@@ -187,12 +188,13 @@ async def _json(response: httpx.Response):
 
 # --- flow ----------------------------------------------------------------------
 
-async def _poll(client, contract, headers, job_id, run_id, started, details):
+async def _poll(client, contract, headers, job_id, run_id, text, started, details):
     """The lookup fallback: the callback is one-shot, so the stored result is polled."""
     url = contract["result_url_template"].replace("{job_id}", job_id)
     limit = started + contract["max_initial_s"] + contract["max_result_s"]
     interval = min(0.5, contract["max_result_s"] / 4)
     path_unresolved = False
+    server_error = False
     while time.monotonic() <= limit:
         response = await client.send(client.build_request("GET", url, headers=headers),
                                      stream=True, follow_redirects=False)
@@ -200,6 +202,7 @@ async def _poll(client, contract, headers, job_id, run_id, started, details):
             if response.status_code in {401, 403}:
                 raise _blocked("backend_authentication_failed", **details)
             pending = response.status_code != 200
+            server_error = response.status_code >= 500
             document = _MISSING if pending else await _json(response)
         finally:
             await response.aclose()
@@ -208,6 +211,9 @@ async def _poll(client, contract, headers, job_id, run_id, started, details):
             if evidence is _MISSING:
                 path_unresolved = True
             elif evidence is not None:
+                if _contains(evidence, text):
+                    # A store-and-echo endpoint returns what we sent, not a result.
+                    raise _blocked("echo_response_not_result", **details)
                 if not isinstance(evidence, (str, dict, list)) or not _contains(evidence, run_id):
                     raise _failed("backend_result_not_linked", **details)
                 details["result_ms"] = int((time.monotonic() - started) * 1000)
@@ -215,6 +221,8 @@ async def _poll(client, contract, headers, job_id, run_id, started, details):
         await asyncio.sleep(interval)
     if path_unresolved:
         raise _blocked("backend_result_path_unresolved", **details)
+    if server_error:
+        raise _failed("backend_unavailable", **details)
     raise _failed("backend_result_timeout", **details)
 
 
@@ -237,7 +245,8 @@ async def _submit(client, contract, headers, body, run_id):
 
 async def _flow(case, contract, headers, client):
     run_id = "be" + secrets.token_hex(8)
-    body = _request_body(contract["utterance_path"], f"{case.message} {run_id}".strip())
+    text = f"{case.message} {run_id}".strip()
+    body = _request_body(contract["utterance_path"], text)
     details: dict = {"run_id": run_id}
     started, first = await _submit(client, contract, headers, body, run_id)
     elapsed = time.monotonic() - started
@@ -257,7 +266,7 @@ async def _flow(case, contract, headers, client):
     job_id = _resolve(first, contract["job_id_path"])
     if not isinstance(job_id, str) or not _JOB_ID.fullmatch(job_id):
         raise _blocked("backend_job_id_unresolved", **details)
-    await _poll(client, contract, headers, job_id, run_id, started, details)
+    await _poll(client, contract, headers, job_id, run_id, text, started, details)
     return Outcome(case.id, VARIANT, "passed", "backend_result_linked", details)
 
 
@@ -280,6 +289,15 @@ async def _probe(case: CaseSpec, config: RuntimeConfig, client) -> Outcome:
             return await _flow(case, contract, headers, owned)
 
 
+def _is_tls(error: BaseException) -> bool:
+    cause = error
+    while cause is not None:
+        if isinstance(cause, ssl.SSLError):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return False
+
+
 async def probe_backend(case: CaseSpec, config: RuntimeConfig, *,
                         client: httpx.AsyncClient | None = None) -> Outcome:
     """Observe the BE first response and, if a contract exists, its linked result."""
@@ -293,8 +311,15 @@ async def probe_backend(case: CaseSpec, config: RuntimeConfig, *,
         status, code, details = "failed", "backend_timeout", {}
     except httpx.InvalidURL:
         status, code, details = "blocked", "backend_contract_invalid", {}
+    except httpx.TimeoutException:
+        status, code, details = "failed", "backend_timeout", {}
     except httpx.HTTPError as error:
-        status, code, details = "blocked", "backend_" + _classify_transport(error), {}
+        tls = _is_tls(error)
+        status, details = "blocked", {}
+        code = "backend_tls_verification_failed" if tls else (
+            "backend_unreachable" if isinstance(error, httpx.TransportError) else "backend_request_failed")
+    except httpx.StreamError:
+        status, code, details = "blocked", "backend_request_failed", {}
     except (OSError, ssl.SSLError):
         status, code, details = "blocked", "backend_request_failed", {}
     # Returned outside the handlers: the result has no exception context.

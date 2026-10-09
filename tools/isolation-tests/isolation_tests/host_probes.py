@@ -18,7 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from .model import Evidence, Outcome
-from .receiver import RUN_ID
+from .evidence import APPROVED_FACTS, EvidenceUnavailable, validate_facts
 
 
 # The single path the read-only check may create (and then remove).
@@ -95,30 +95,84 @@ def _write_probe() -> bool | None:
     return False
 
 
-def _resource_profile() -> bool | None:
-    values = []
-    for name in ("memory.max", "pids.max", "cpu.max"):
-        text = _read_text(CGROUP_ROOT / name)
-        if text is None:
-            return None
-        values.append(text.split()[0] if text.split() else "")
-    return all(value and value != "max" for value in values)
+_SIZE = re.compile(r"size=(\d+)([kKmMgG]?)\Z")
+_UNIT_MIB = {"": 1 / 1048576, "k": 1 / 1024, "m": 1, "g": 1024}
+# Approved container profile: 1.5 CPU, 1536 MiB, 256 PIDs, 256 MiB shm, 256 MiB tmpfs.
+BASELINE = {"cpu_limit": 1.5, "memory_limit_mib": 1536, "pids_limit": 256,
+            "shm_mib": 256, "tmpfs_mib": 256}
+
+
+def _first_token(text: str | None) -> str | None:
+    parts = text.split() if text else []
+    return parts[0] if parts else None
+
+
+def _cpu_limit(text: str | None) -> float | None:
+    parts = text.split() if text else []
+    if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) == 0:
+        return None
+    if parts[0] == "max":
+        return -1
+    return int(parts[0]) / int(parts[1]) if parts[0].isdigit() else None
+
+
+def _bounded(token: str | None, scale: int = 1) -> int | None:
+    if token == "max":
+        return -1  # unlimited
+    return int(token) // scale if token and token.isdigit() else None
+
+
+def _mount_size_mib(mounts: str | None, mount_point: str) -> int | None:
+    for line in (mounts or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 4 and parts[1] == mount_point and parts[2] == "tmpfs":
+            for option in parts[3].split(","):
+                match = _SIZE.fullmatch(option)
+                if match:
+                    return int(int(match.group(1)) * _UNIT_MIB[match.group(2).lower()])
+    return None
+
+
+def _resource_profile() -> dict:
+    """Actual CPU/memory/PIDs/shm/tmpfs settings and their comparison with the baseline.
+
+    Only numbers are recorded. ``-1`` means unlimited. Nothing is changed.
+    """
+    mounts = _read_text(PROC_MOUNTS)
+    values = {
+        "cpu_limit": _cpu_limit(_read_text(CGROUP_ROOT / "cpu.max")),
+        "memory_limit_mib": _bounded(_first_token(_read_text(CGROUP_ROOT / "memory.max")), 1048576),
+        "pids_limit": _bounded(_first_token(_read_text(CGROUP_ROOT / "pids.max"))),
+        "shm_mib": _mount_size_mib(mounts, "/dev/shm"),
+        "tmpfs_mib": _mount_size_mib(mounts, "/tmp"),
+    }
+    facts: dict = {name: value for name, value in values.items() if value is not None}
+    recorded = len(facts) == len(BASELINE)
+    facts["resource_profile_recorded"] = recorded
+    if recorded:
+        facts["resource_limits_ok"] = all(0 < facts[n] <= limit for n, limit in BASELINE.items())
+    return facts
 
 
 def collect_host_facts(*, boundary: str | None = None) -> dict:
-    """Facts for the boundary this process runs in; values of env vars never read."""
+    """Facts for the boundary this process runs in; values of env vars never read.
+
+    ``boundary`` is only what the administrator says. The detected boundary is
+    what cases are judged on, and a disagreement is recorded for the validator.
+    """
     facts: dict = {
         "environment_names_ok": environment_names_ok(list(os.environ)),
-        "boundary": boundary if boundary in {"host", "container"} else None,
         "platform": "linux" if _platform().startswith("linux") else "unsupported",
     }
+    if boundary in {"host", "container"}:
+        facts["boundary_declared"] = boundary
     if facts["platform"] != "linux":
         # A Windows administrator PC proves nothing about the Linux boundary.
         facts["unsupported_boundary"] = True
-        facts["boundary"] = facts["boundary"] or "host"
+        facts["boundary"] = "host"
         return facts
     facts["unsupported_boundary"] = False
-    facts["boundary"] = facts["boundary"] or _detect_boundary()
+    facts["boundary"] = _detect_boundary()
     status = _read_text(PROC_STATUS)
     if status is not None:
         fields = _status_fields(status)
@@ -138,41 +192,19 @@ def collect_host_facts(*, boundary: str | None = None) -> dict:
         mounts_ok = _mount_facts(mounts)
         if mounts_ok is not None:
             facts["mounts_ok"] = mounts_ok
-    readonly = _write_probe()
-    if readonly is not None:
-        facts["readonly_ok"] = readonly
-    profile = _resource_profile()
-    if profile is not None:
-        facts["resource_profile_recorded"] = profile
+    # The write probe belongs to the container boundary; a host is never written.
+    facts["write_probe_applicable"] = facts["boundary"] == "container"
+    if facts["write_probe_applicable"]:
+        readonly = _write_probe()
+        if readonly is not None:
+            facts["readonly_ok"] = readonly
+    facts.update(_resource_profile())
     return facts
 
 
 # --- administrator evidence contract -----------------------------------------
+# The approved fact vocabulary (names and types) is defined once, in evidence.py.
 
-_TEXT = {
-    "variant": re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z"),
-    "boundary": re.compile(r"(host|container)\Z"),
-    "platform": re.compile(r"(linux|unsupported|windows|darwin)\Z"),
-    "evidence_source": re.compile(r"(observed|self_reported)\Z"),
-    "replacement_kind": re.compile(r"(new_instance|restart|reboot)\Z"),
-    "followup_run_id": RUN_ID,
-    "observed_digest": re.compile(r"sha256:[0-9a-f]{64}\Z"),
-    "approved_digest": re.compile(r"sha256:[0-9a-f]{64}\Z"),
-    "observed_digest_kind": re.compile(r"(image_manifest|image_index|image_config|container_id)\Z"),
-    "approved_digest_kind": re.compile(r"(image_manifest|image_index|image_config|container_id)\Z"),
-    "observed_digest_platform": re.compile(r"[a-z0-9]+/[a-z0-9]+(?:/[a-z0-9]+)?\Z"),
-    "approved_digest_platform": re.compile(r"[a-z0-9]+/[a-z0-9]+(?:/[a-z0-9]+)?\Z"),
-}
-_BOOLEANS = frozenset({
-    "unsupported_boundary", "positive_control_ok", "receiver_control_ok", "request_blocked",
-    "receiver_observed", "firewall_drop_observed", "probe_in_container", "uid_ok", "caps_ok",
-    "seccomp_ok", "no_new_privileges_ok", "sandbox_ok", "readonly_ok", "mounts_ok",
-    "environment_names_ok", "resource_profile_recorded", "digest_ok", "remote_job_terminated",
-    "context_cleanup_ok", "source_allowed", "source_denied", "replacement_ok",
-    "credentials_rotated", "old_credentials_rejected", "recovery_ok", "kakao_received",
-})
-_NUMBERS = frozenset({"children_remaining", "clock_offset_seconds"})
-APPROVED_FACTS = frozenset(_TEXT) | _BOOLEANS | _NUMBERS
 HOST_CASES = frozenset({"HOST-01", "HOST-02", "HOST-03", "NET-05", "INT-02", "REC-01", "INT-03"})
 _CONTAINER_CASES = frozenset({"HOST-01", "HOST-02", "NET-05"})
 
@@ -184,53 +216,40 @@ def _variants() -> dict[str, tuple[str, ...]]:
     return {case.id: case.variants for case in load_cases(CANONICAL_MANIFEST)}
 
 
-def _typed(facts: dict) -> bool:
-    for key, value in facts.items():
-        if key in _TEXT:
-            if not isinstance(value, str) or not _TEXT[key].fullmatch(value):
-                return False
-        elif key in _BOOLEANS:
-            if type(value) is not bool:
-                return False
-        elif key == "children_remaining":
-            if type(value) is not int or value < 0:
-                return False
-        elif key == "clock_offset_seconds":
-            if type(value) not in (int, float) or value != value or abs(value) == float("inf"):
-                return False
-        else:
-            return False
-    return True
-
-
 def validate_host_evidence(case_id: str, evidence: Evidence) -> Outcome:
     """Check that administrator evidence is trustworthy for one host/integration claim.
 
     ``passed`` means the evidence is well formed, from the right boundary,
     independently observed and self-consistent; ``evaluate`` still decides the
     case against its contract. Contradictions are ``failed``; missing or weak
-    evidence is ``blocked``. Only fixed codes are returned, never fact values.
+    evidence is ``blocked``. Only fixed codes are returned: case and variant
+    appear in an Outcome only after they match the canonical manifest, so no
+    untrusted text can be echoed.
     """
     facts = evidence.facts if isinstance(evidence.facts, dict) else {}
-    variant = facts.get("variant") if isinstance(facts.get("variant"), str) else "unknown"
+    safe_case = case_id if case_id in HOST_CASES else "unknown"
+    state = {"variant": "unknown"}
 
     def outcome(status, reason, **details):
-        return Outcome(case_id if isinstance(case_id, str) else "unknown", variant,
-                       status, reason, details)
+        return Outcome(safe_case, state["variant"], status, reason, details)
 
-    if case_id not in HOST_CASES or evidence.case_id != case_id:
+    if safe_case == "unknown" or evidence.case_id != case_id:
         return outcome("blocked", "unsupported_case")
     if set(facts) - APPROVED_FACTS:
         return outcome("blocked", "unapproved_fact", unapproved_count=len(set(facts) - APPROVED_FACTS))
-    if not _typed(facts):
+    try:
+        validate_facts(facts)
+    except EvidenceUnavailable:
         return outcome("blocked", "unapproved_value")
-    if variant not in _variants()[case_id]:
+    if facts["variant"] not in _variants()[case_id]:
         return outcome("blocked", "unknown_variant")
+    variant = state["variant"] = facts["variant"]
     if facts.get("platform") in {"windows", "darwin", "unsupported"} or facts.get("unsupported_boundary") is True:
         return outcome("blocked", "unsupported_boundary")
+    if "boundary_declared" in facts and facts["boundary_declared"] != facts.get("boundary"):
+        # The detected boundary is what is judged; a different claim is not trusted.
+        return outcome("blocked", "boundary_mismatch")
     if case_id in _CONTAINER_CASES and facts.get("boundary") != "container":
-        return outcome("blocked", "wrong_boundary", required="container")
-    if case_id == "NET-05" and facts.get("probe_in_container") is True and facts.get("boundary") != "container":
         return outcome("blocked", "wrong_boundary", required="container")
     return _case_checks(case_id, variant, facts, outcome)
 
@@ -248,11 +267,11 @@ def _case_checks(case_id, variant, facts, outcome):
     if case_id == "REC-01":
         return _replacement_check(facts, outcome)
     if case_id == "INT-03" and variant == "kakao-receipt":
-        if facts.get("kakao_received") is True and facts.get("evidence_source") != "observed":
-            return outcome("blocked", "self_reported_only")
         if "kakao_received" not in facts:
             return outcome("blocked", "kakao_receipt_missing")
-    if case_id in {"NET-05", "INT-02"} and claims_block and facts.get("evidence_source") == "self_reported":
+        if facts.get("kakao_received") is True and facts.get("evidence_source") != "observed":
+            return outcome("blocked", "self_reported_only")
+    if case_id in {"NET-05", "INT-02"} and claims_block and facts.get("evidence_source") != "observed":
         return outcome("blocked", "self_reported_only")
     return outcome("passed", "evidence_contract_ok")
 

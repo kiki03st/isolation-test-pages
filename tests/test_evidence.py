@@ -253,3 +253,13 @@ def test_receiver_correlation_needs_aligned_clocks(offset):
     from isolation_tests.evidence import receiver_observed
 
     assert receiver_observed(_trial(clock_offset_seconds=offset), ()) is None
+
+
+def test_unapproved_fact_names_and_host_fact_types_are_rejected():
+    from isolation_tests.evidence import EvidenceUnavailable, validate_facts
+
+    validate_facts({"variant": "fetch", "uid_ok": True, "boundary": "container"})
+    for bad in ({"api_token": "x"}, {"uid_ok": 1}, {"boundary": "Bearer secret"},
+                {"seccomp_ok": "true"}, {"memory_limit_mib": True}, {"evidence_source": "me"}):
+        with pytest.raises(EvidenceUnavailable):
+            validate_facts({"variant": "fetch", **bad})

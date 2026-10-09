@@ -27,16 +27,63 @@ _VARIANT = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _RECORD_FIELDS = {"run_id", "case_id", "started_at", "ended_at", "facts", "references"}
 
-# Authoritative fact types. Truthy substitutes (1, "true", [] ...) are rejected.
+# Authoritative fact vocabulary: names and types. Truthy substitutes (1, "true",
+# [] ...) are rejected and so is every name that is not listed here, which keeps
+# raw secrets and ad-hoc keys out of results.
 BOOLEAN_FACTS = frozenset({
     "positive_control_ok", "receiver_control_ok", "request_blocked", "receiver_observed",
     "firewall_drop_observed", "remote_job_terminated", "recovery_ok", "caps_ok",
     "sandbox_ok", "readonly_ok", "mounts_ok", "environment_names_ok", "digest_ok",
     "replacement_ok", "kakao_received", "collection", "analysis", "no_new_privileges_ok",
+    # Host, integration and recovery evidence.
+    "uid_ok", "seccomp_ok", "unsupported_boundary", "write_probe_applicable",
+    "source_allowed", "source_denied", "credentials_rotated", "old_credentials_rejected",
+    "context_cleanup_ok", "resource_profile_recorded", "resource_limits_ok",
+    "probe_in_container", "authentication_ok", "authentication_rejected", "tls_rejected",
+    "backend_result_ok", "first_response_deadline_ok", "collector_deadline_ok",
+    "fallback_ok", "callback_failure_recorded", "false_success_reported",
+    # Collection, network, session, limits and analysis.
+    "actual_byte_limit_ok", "boundary_results_ok", "concurrency_limit_known",
+    "concurrency_limit_ok", "context_fresh", "deadline_met", "disabled_readonly_ok",
+    "download_attempt_observed", "download_clicked", "download_link_recorded",
+    "fabricated_evidence_rejected", "file_executed", "form_associations_ok",
+    "form_destination_ok", "forms_submitted", "initial_url_rejected", "limit_exceeded_confirmed",
+    "limit_plus_one_sent", "navigation_chain_ok", "page_opened", "paired_verdict_equal",
+    "payment_request_observed", "queue_limit_ok", "redirect_limit_ok", "relative_targets_ok",
+    "safe_claimed", "same_host_verified", "service_worker_registered", "shared_ip_verified",
+    "stream_bounds_ok",
 })
 COUNT_FACTS = frozenset({"children_remaining", "download_temporary_bytes", "download_remaining_bytes"})
 REGION_FACTS = frozenset({"inspected_regions", "unknown_regions"})
 CLOCK_FACT = "clock_offset_seconds"
+# Finite non-boolean numbers. Resource limits use -1 for "unlimited".
+NUMBER_FACTS = frozenset({
+    CLOCK_FACT, "concurrency_limit", "fixture_max_active", "collector_deadline_s",
+    "deadline_grace_s", "boundary_limit", "payment_amount_krw", "cpu_limit",
+    "memory_limit_mib", "pids_limit", "shm_mib", "tmpfs_mib",
+})
+# Flat scalar arrays (not regions).
+LIST_FACTS = frozenset({"boundary_offsets", "session_stores_seeded", "session_markers_present"})
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_DIGEST_KIND = re.compile(r"(image_manifest|image_index|image_config|container_id)\Z")
+_PLATFORM_ID = re.compile(r"[a-z0-9]+/[a-z0-9]+(?:/[a-z0-9]+)?\Z")
+# Strings are restricted by pattern so a pasted secret cannot fit.
+TEXT_FACTS = {
+    "variant": _VARIANT,
+    "boundary": re.compile(r"(host|container)\Z"),
+    "boundary_declared": re.compile(r"(host|container)\Z"),
+    "platform": re.compile(r"(linux|unsupported|windows|darwin)\Z"),
+    "evidence_source": re.compile(r"(observed|self_reported)\Z"),
+    "replacement_kind": re.compile(r"(new_instance|restart|reboot)\Z"),
+    "followup_run_id": RUN_ID,
+    "observed_digest": _DIGEST, "approved_digest": _DIGEST,
+    "observed_digest_kind": _DIGEST_KIND, "approved_digest_kind": _DIGEST_KIND,
+    "observed_digest_platform": _PLATFORM_ID, "approved_digest_platform": _PLATFORM_ID,
+    "http_page_state": re.compile(r"(403|404|500|block_page|captcha_page)\Z"),
+    "navigation_kind": re.compile(r"(js|meta)\Z"),
+}
+APPROVED_FACTS = (BOOLEAN_FACTS | COUNT_FACTS | REGION_FACTS | NUMBER_FACTS | LIST_FACTS
+                  | frozenset(TEXT_FACTS))
 
 
 class EvidenceUnavailable(ValueError):
@@ -63,6 +110,12 @@ def validate_facts(facts: Any) -> dict:
                 raise EvidenceUnavailable("facts permit only scalars or flat scalar arrays")
             if type(item) is float and not math.isfinite(item):
                 raise EvidenceUnavailable("fact numbers must be finite")
+        if key not in APPROVED_FACTS:
+            raise EvidenceUnavailable("fact name is not in the approved vocabulary")
+        if key in TEXT_FACTS and not (isinstance(value, str) and TEXT_FACTS[key].fullmatch(value)):
+            raise EvidenceUnavailable(f"fact {key} has an unapproved value")
+        if key in LIST_FACTS and not isinstance(value, list):
+            raise EvidenceUnavailable(f"fact {key} must be a list")
         if key in BOOLEAN_FACTS and type(value) is not bool:
             raise EvidenceUnavailable(f"fact {key} must be a boolean")
         if key in COUNT_FACTS and (type(value) is not int or value < 0):
@@ -71,8 +124,8 @@ def validate_facts(facts: Any) -> dict:
                 not isinstance(value, list) or len(set(map(repr, value))) != len(value)
                 or any(not isinstance(item, str) or not _NAME.fullmatch(item) for item in value)):
             raise EvidenceUnavailable(f"fact {key} must list unique region names")
-        if key == CLOCK_FACT and not _is_number(value):
-            raise EvidenceUnavailable("clock_offset_seconds must be a finite number")
+        if key in NUMBER_FACTS and not _is_number(value):
+            raise EvidenceUnavailable(f"fact {key} must be a finite number")
     return facts
 
 

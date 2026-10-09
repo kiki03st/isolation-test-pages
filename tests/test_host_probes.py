@@ -109,7 +109,7 @@ def test_cli_host_probe_writes_names_only_and_refuses_overwrite(tmp_path, monkey
     monkeypatch.setenv("SYNTHETIC_API_KEY", SECRET)
     out = tmp_path / "probe.json"
     code = main(["host-probe", "--output", str(out)])
-    assert code in (0, 3)
+    assert code in (0, 2)
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["schema"] == "host-probe-v1" and data["facts"]["environment_names_ok"] is False
     assert SECRET not in out.read_text(encoding="utf-8") and SECRET not in capsys.readouterr().out
@@ -206,7 +206,8 @@ def test_recovery_needs_followup_run_reference():
 def test_block_claims_need_positive_control_and_observation():
     base = dict(variant="tcp", boundary="container", request_blocked=True, probe_in_container=True)
     assert check("NET-05", **base).reason == "missing_positive_control"
-    assert check("NET-05", **base, positive_control_ok=True).status == "passed"
+    assert check("NET-05", **base, positive_control_ok=True).reason == "self_reported_only"
+    assert check("NET-05", **base, positive_control_ok=True, evidence_source="observed").status == "passed"
     assert check("NET-05", **base, positive_control_ok=True,
                  evidence_source="self_reported").reason == "self_reported_only"
     denied = dict(variant="denied-source", source_denied=True)
@@ -239,3 +240,103 @@ def test_unknown_case_variant_and_mismatched_case_are_blocked():
     assert check("HOST-03", variant="nope").reason == "unknown_variant"
     from isolation_tests.host_probes import validate_host_evidence
     assert validate_host_evidence("HOST-03", ev("HOST-01", variant="digest")).reason == "unsupported_case"
+
+
+# --- fix round 1 -------------------------------------------------------------
+
+SECRET_VARIANTS = ["Bearer synthetic-secret", "synthetic-secret-value", "x" * 80]
+
+
+@pytest.mark.parametrize("variant", SECRET_VARIANTS)
+@pytest.mark.parametrize("case_id,facts", [
+    ("COL-01", {}),
+    ("HOST-03", {"api_token": "v"}),
+    ("HOST-03", {"observed_digest": "Bearer s"}),
+    ("HOST-03", {}),
+    ("HOST-03", {"platform": "windows"}),
+])
+def test_untrusted_variant_is_never_echoed(variant, case_id, facts):
+    result = check(case_id, variant=variant, **facts)
+    assert result.variant == "unknown"
+    assert "secret" not in repr(result) and "xxxx" not in repr(result)
+
+
+def test_untrusted_case_id_is_never_echoed():
+    from isolation_tests.host_probes import validate_host_evidence
+    result = validate_host_evidence("Bearer synthetic-secret", ev("Bearer synthetic-secret", variant="digest"))
+    assert result.case_id == "unknown" and "secret" not in repr(result)
+
+
+CGROUP = {"memory.max": "1610612736\n", "pids.max": "256\n", "cpu.max": "150000 100000\n"}
+SHM_TMP = ("overlay / overlay ro,relatime 0 0\n"
+           "tmpfs /dev/shm tmpfs rw,nosuid,nodev,noexec,relatime,size=262144k 0 0\n"
+           "tmpfs /tmp tmpfs rw,nosuid,nodev,noexec,relatime,size=262144k 0 0\n")
+
+
+def profile(monkeypatch, cgroup=CGROUP, mounts=SHM_TMP):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_read_text", lambda p: (
+        mounts if p == host_probes.PROC_MOUNTS else cgroup.get(p.name)))
+    return host_probes._resource_profile()
+
+
+def test_resource_profile_records_values_and_matches_baseline(monkeypatch):
+    facts = profile(monkeypatch)
+    assert facts == {"cpu_limit": 1.5, "memory_limit_mib": 1536, "pids_limit": 256,
+                     "shm_mib": 256, "tmpfs_mib": 256,
+                     "resource_profile_recorded": True, "resource_limits_ok": True}
+
+
+def test_resource_profile_over_baseline_is_recorded_but_not_ok(monkeypatch):
+    facts = profile(monkeypatch, cgroup={**CGROUP, "memory.max": "8589934592"})
+    assert facts["memory_limit_mib"] == 8192
+    assert facts["resource_profile_recorded"] is True and facts["resource_limits_ok"] is False
+
+
+def test_tiny_limit_does_not_masquerade_as_the_approved_profile(monkeypatch):
+    facts = profile(monkeypatch, cgroup={**CGROUP, "memory.max": "1"})
+    assert facts["memory_limit_mib"] == 0 and facts["resource_limits_ok"] is False
+
+
+def test_unlimited_value_is_recorded_as_minus_one_and_fails_limits(monkeypatch):
+    facts = profile(monkeypatch, cgroup={**CGROUP, "pids.max": "max\n", "cpu.max": "max 100000\n"})
+    assert facts["pids_limit"] == -1 and facts["cpu_limit"] == -1
+    assert facts["resource_limits_ok"] is False
+
+
+def test_profile_needs_all_five_values_to_be_recorded(monkeypatch):
+    for mounts in ("overlay / overlay ro 0 0\n", SHM_TMP.split("tmpfs /tmp")[0]):
+        facts = profile(monkeypatch, mounts=mounts)
+        assert facts["resource_profile_recorded"] is False and "resource_limits_ok" not in facts
+    facts = profile(monkeypatch, cgroup={k: v for k, v in CGROUP.items() if k != "cpu.max"})
+    assert facts["resource_profile_recorded"] is False and "cpu_limit" not in facts
+
+
+def test_declared_boundary_never_replaces_detection(monkeypatch):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_platform", lambda: "linux")
+    monkeypatch.setattr(host_probes, "_detect_boundary", lambda: "host")
+    facts = host_probes.collect_host_facts(boundary="container")
+    assert facts["boundary"] == "host" and facts["boundary_declared"] == "container"
+    result = check("HOST-02", variant="environment", environment_names_ok=True,
+                   **{k: facts[k] for k in ("boundary", "boundary_declared")})
+    assert (result.status, result.reason) == ("blocked", "boundary_mismatch")
+
+
+def test_write_probe_never_runs_on_the_host(monkeypatch):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_platform", lambda: "linux")
+    monkeypatch.setattr(host_probes, "_detect_boundary", lambda: "host")
+    monkeypatch.setattr(host_probes, "_write_probe", lambda: pytest.fail("host must not be written"))
+    facts = host_probes.collect_host_facts()
+    assert "readonly_ok" not in facts and facts["write_probe_applicable"] is False
+
+
+def test_single_fact_vocabulary_lives_in_evidence_module():
+    from isolation_tests import evidence, host_probes
+    assert host_probes.APPROVED_FACTS is evidence.APPROVED_FACTS
+    for name in ("uid_ok", "seccomp_ok", "unsupported_boundary", "source_allowed", "source_denied",
+                 "credentials_rotated", "old_credentials_rejected", "context_cleanup_ok",
+                 "boundary", "evidence_source", "replacement_kind", "concurrency_limit",
+                 "fixture_max_active", "cpu_limit", "memory_limit_mib", "resource_limits_ok"):
+        assert name in evidence.APPROVED_FACTS, name

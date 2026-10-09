@@ -22,7 +22,7 @@ def _host_probe(output: Path, boundary: str | None) -> int:
         print("error: cannot create the output file", file=sys.stderr)
         return 2
     print(f"wrote {len(facts)} facts")
-    return 0 if not facts.get("unsupported_boundary") else 3
+    return 0 if not facts.get("unsupported_boundary") else 2
 
 
 def main(argv: list[str] | None = None) -> int:

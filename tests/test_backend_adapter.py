@@ -210,7 +210,7 @@ def test_transport_error_with_token_text_is_translated(backend_case, configured_
     def handler(request):
         raise httpx.ConnectError(f"boom Bearer {TOKEN}", request=request)
     result = run(backend_case, config, handler)
-    assert (result.status, result.reason) == ("blocked", "backend_collector_unreachable")
+    assert (result.status, result.reason) == ("blocked", "backend_unreachable")
     assert TOKEN not in repr(result)
 
 
@@ -229,3 +229,49 @@ def test_example_contract_has_only_null_placeholders():
     data = json.loads(path.read_text(encoding="utf-8"))
     for name in ("submit_url", "job_id_path", "result_url_template", "result_evidence_path", "auth_env"):
         assert data[name] is None
+
+
+def test_result_that_only_echoes_the_sent_utterance_is_blocked(backend_case, configured_backend,
+                                                                write_backend_contract):
+    config = with_contract(configured_backend, write_backend_contract, **FULL)
+    state = {}
+
+    def handler(request):
+        if request.method == "POST":
+            state["text"] = sent(request)
+            return httpx.Response(200, json={"useCallback": True, "jobId": "job-1"})
+        return httpx.Response(200, json={"result": {"evidence": "저장됨: " + state["text"]}})
+    result = run(backend_case, config, handler)
+    assert (result.status, result.reason) == ("blocked", "echo_response_not_result")
+
+
+def test_persistent_server_error_while_polling_is_unavailable(backend_case, configured_backend,
+                                                               write_backend_contract):
+    config = with_contract(configured_backend, write_backend_contract, **{**FULL, "max_result_s": 0.3})
+
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(200, json={"jobId": "job-1"})
+        return httpx.Response(503)
+    result = run(backend_case, config, handler)
+    assert (result.status, result.reason) == ("failed", "backend_unavailable")
+
+
+def test_httpx_timeout_is_a_failed_deadline_without_collector_wording(backend_case, configured_backend):
+    def handler(request):
+        raise httpx.ReadTimeout("slow", request=request)
+    result = run(backend_case, configured_backend, handler)
+    assert (result.status, result.reason) == ("failed", "backend_timeout")
+
+
+def test_unexpected_stream_error_becomes_a_fixed_code(backend_case, configured_backend):
+    def handler(request):
+        raise httpx.StreamConsumed()
+    result = run(backend_case, configured_backend, handler)
+    assert (result.status, result.reason) == ("blocked", "backend_request_failed")
+
+
+def test_utterance_path_must_be_string_keys(backend_case, configured_backend, write_backend_contract):
+    config = with_contract(configured_backend, write_backend_contract, submit_url=SUBMIT,
+                           utterance_path=["userRequest", 0])
+    assert run(backend_case, config, no_request).reason == "backend_contract_invalid"

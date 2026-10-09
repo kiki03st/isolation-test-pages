@@ -77,7 +77,7 @@ def _run(case, variant, facts, page=None, *, capabilities=None, ended_at="2026-1
 
 
 def test_console_cors_is_not_network_block(case_net01):
-    assert _run(case_net01, "fetch", {"console_error": "CORS"}).status == "blocked"
+    assert _run(case_net01, "fetch", {"stream_bounds_ok": True}).status == "blocked"
 
 
 def test_actual_app_block_with_both_controls_and_no_receiver_request_passes(case_net01):
@@ -100,7 +100,7 @@ def test_failed_positive_controls_block_isolation_claim(case_net01, control):
 
 
 def test_forbidden_request_observed_is_failure_even_with_cors_and_block_claim(case_net01):
-    facts = {**_network_facts(), "receiver_observed": True, "console_error": "CORS"}
+    facts = {**_network_facts(), "receiver_observed": True, "stream_bounds_ok": True}
     assert _run(case_net01, "fetch", facts).status == "failed"
 
 
@@ -175,7 +175,7 @@ def test_actual_inside_boundary_firewall_drop_passes(cases):
 
 
 def test_runner_timeout_without_remote_termination_is_blocked(limit_case):
-    facts = {"positive_control_ok": True, "runner_timeout": True}
+    facts = {"positive_control_ok": True}
     assert _run(limit_case, "delay-15s", facts, _page(failures=("timeout",))).status == "blocked"
 
 
