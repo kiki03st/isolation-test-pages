@@ -462,3 +462,37 @@ def render_network(case_id: str, variant: str, targets: dict[str, str]) -> bytes
             ".catch(function () {});\n}"
         )
     return _network_page(title, "<p>등록 또는 실행 한 번을 시도합니다.</p>", script)
+
+
+NET_VARIANTS = _NET_VARIANTS
+
+# Distinct probe text per HTTP-01 variant; none contains a real service name.
+_HTTP_PAGES: dict[tuple[str, str], bytes] = {
+    ("HTTP-01", "403"): _document("접근 거부", "<h1>403</h1><p>접근이 거부되었습니다.</p>"),
+    ("HTTP-01", "404"): _document("찾을 수 없음", "<h1>404</h1><p>페이지를 찾을 수 없습니다.</p>"),
+    ("HTTP-01", "500"): _document("서버 오류", "<h1>500</h1><p>서버 오류가 발생했습니다.</p>"),
+    ("HTTP-01", "block-page"): _document(
+        "접속 차단 안내", "<h1>접속 차단</h1><p>이 주소로의 접속이 차단되었습니다.</p>",
+    ),
+    ("HTTP-01", "captcha-page"): _document(
+        "자동 입력 방지", "<h1>자동 입력 방지</h1><p>사람인지 확인합니다. (captcha 합성 표본)</p>",
+    ),
+    ("HTTP-02", "wrong-mime"): _document("잘못된 형식 표본", "<p>HTML이 text/plain으로 전달됩니다.</p>"),
+    ("HTTP-02", "truncated"): _document("중간에 끊기는 표본", "<p>" + "끊김 " * 200 + "</p>"),
+}
+
+# Deliberately not UTF-8: 0xFF can never start a UTF-8 sequence.
+INVALID_UTF8_BYTES = (
+    b'<!doctype html>\n<html lang="ko"><head><meta charset="utf-8"><title>invalid</title></head>'
+    b"<body><p>invalid bytes: \xff\xfe</p></body></html>\n"
+)
+
+
+def render_http(case_id: str, variant: str) -> bytes:
+    """Return the body of a fixed HTTP-01/HTTP-02 response."""
+    if (case_id, variant) == ("HTTP-02", "invalid-utf8"):
+        return INVALID_UTF8_BYTES
+    try:
+        return _HTTP_PAGES[(case_id, variant)]
+    except KeyError:
+        raise ValueError("unregistered HTTP case or variant") from None
