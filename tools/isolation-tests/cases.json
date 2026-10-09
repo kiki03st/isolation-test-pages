@@ -2830,7 +2830,7 @@
       "id": "HOST-01",
       "group": "host",
       "title": "프로세스 권한과 샌드박스",
-      "description": "UID, capabilities, seccomp와 브라우저 샌드박스를 컨테이너 안에서 검사한다.",
+      "description": "UID, capabilities, seccomp, no-new-privileges와 브라우저 샌드박스를 컨테이너 안에서 검사한다.",
       "execution_kind": "host_probe",
       "target_key": null,
       "relative_path": null,
@@ -2851,13 +2851,15 @@
                 "uid_ok": true,
                 "caps_ok": true,
                 "seccomp_ok": true,
+                "no_new_privileges_ok": true,
                 "positive_control_ok": true
               }
             },
             "required_evidence": [
               "uid_ok",
               "caps_ok",
-              "seccomp_ok"
+              "seccomp_ok",
+              "no_new_privileges_ok"
             ],
             "required_capabilities": []
           },

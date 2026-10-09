@@ -235,6 +235,10 @@ def test_task2_canonical_case_preserves_all_fixed_variants_and_contracts(case_id
             assert all(isinstance(item, str) for item in variant[key])
         if execution_kind == "host_probe":
             assert variant["assertions"].get("required_facts")
+    if case_id == "HOST-01":
+        process = observations["process"]
+        assert process["assertions"]["required_facts"]["no_new_privileges_ok"] is True
+        assert "no_new_privileges_ok" in process["required_evidence"]
     if group == "analysis":
         assert set(case.expected_analysis) == {"variants"}
         analysis = case.expected_analysis["variants"]
@@ -524,3 +528,23 @@ def test_task2_analysis_mode_wrong_types_raise_value_error(task2_analysis_case_d
     task2_analysis_case_data["expected_analysis"]["variants"]["default"]["mode"] = mode
     with pytest.raises(ValueError):
         load_cases(write_manifest({"version": 1, "cases": [task2_analysis_case_data]}))
+
+
+@pytest.mark.parametrize("value", [0, 1, "true", None, [], {}])
+def test_task2_no_new_privileges_fact_requires_boolean(task2_variant_case_data, write_manifest, value):
+    from isolation_tests.manifest import load_cases
+
+    facts = task2_variant_case_data["expected_observations"]["variants"]["default"]["assertions"].setdefault("required_facts", {})
+    facts["no_new_privileges_ok"] = value
+    with pytest.raises(ValueError, match="no_new_privileges_ok.*boolean"):
+        load_cases(write_manifest({"version": 1, "cases": [task2_variant_case_data]}))
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_task2_no_new_privileges_fact_preserves_actual_booleans(task2_variant_case_data, write_manifest, value):
+    from isolation_tests.manifest import load_cases
+
+    facts = task2_variant_case_data["expected_observations"]["variants"]["default"]["assertions"].setdefault("required_facts", {})
+    facts["no_new_privileges_ok"] = value
+    case = load_cases(write_manifest({"version": 1, "cases": [task2_variant_case_data]}))[0]
+    assert case.expected_observations["variants"]["default"]["assertions"]["required_facts"]["no_new_privileges_ok"] is value
