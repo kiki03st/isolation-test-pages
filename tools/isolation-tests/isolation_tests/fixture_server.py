@@ -9,6 +9,7 @@ import os
 import re
 import socket
 import ssl
+import sys
 import stat
 import time
 from dataclasses import dataclass, field
@@ -242,6 +243,16 @@ def _static_bytes(root: Path, allowed: dict[str, str], raw: str):
 
 # --- HTTP handling -------------------------------------------------------
 
+def _diagnose(label: str, error: BaseException | None) -> None:
+    """Report only a fixed route label and the exception class, never request data."""
+    name = type(error).__name__ if error is not None else "unknown"
+    try:
+        sys.stderr.write(f"fixture error: route={label} type={name}\n")
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        pass
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 10
@@ -305,6 +316,21 @@ class _Handler(BaseHTTPRequestHandler):
         return self._respond(_plan(code, b"", _TEXT))
 
     def do_GET(self):
+        # A GET body is never read; closing keeps it from being parsed as the next request.
+        if self.headers.get("Content-Length", "0").strip() not in {"", "0"}                 or "Transfer-Encoding" in self.headers:
+            self.close_connection = True
+        try:
+            return self._route()
+        except Exception as error:
+            # Name the failure class only: an exception message may quote request data.
+            _diagnose("route", error)
+            self.close_connection = True
+            try:
+                self._respond(_plan(500, b"", _TEXT))
+            except OSError:
+                pass
+
+    def _route(self):
         parts = urlsplit(self.path)
         segments = parts.path.split("/")
         if parts.path == "/healthz":
@@ -351,23 +377,28 @@ class _Handler(BaseHTTPRequestHandler):
         run_id = self._query(query)["run_id"]
         if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
             return self._status(400)
-        sent = self._respond(_plan(200, _PROBE_BODY, _TEXT))
-        self._record(case_id, run_id, sent)
+        # Record before answering so a 200 always means the event was stored.
+        if not self._record(case_id, run_id, len(_PROBE_BODY)):
+            return self._status(503)
+        self._respond(_plan(200, _PROBE_BODY, _TEXT))
 
-    def _record(self, case_id, run_id, sent):
+    def _record(self, case_id, run_id, sent) -> bool:
+        """Store the event; False only when a log is configured but the write failed."""
         log_path = self.server.fixture_config.log_path
         if (log_path is None or case_id not in RECEIVER_CASES
                 or not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id)
                 or not re.fullmatch(r"[A-Z]{3,10}", self.command)):
-            return
+            return log_path is None
         try:
             write_receiver_event(
                 log_path, case_id=case_id, run_id=run_id, method=self.command,
                 fixed_path=f"/v1/receive/{case_id}", bytes_sent=sent,
                 at=datetime.now(timezone.utc).isoformat(),
             )
-        except OSError:
-            pass
+        except OSError as error:
+            _diagnose("receiver-log", error)
+            return False
+        return True
 
     def _static(self, raw):
         data = None
@@ -395,7 +426,7 @@ class _Server(ThreadingHTTPServer):
     allow_reuse_address = False
 
     def handle_error(self, request, client_address):
-        pass
+        _diagnose("connection", sys.exc_info()[1])
 
 
 class _Server6(_Server):

@@ -42,19 +42,38 @@ def _validate(event: object) -> dict:
     if not isinstance(at, str) or len(at) > 40:
         raise ValueError("receiver event time is invalid")
     try:
-        datetime.fromisoformat(at)
+        parsed = datetime.fromisoformat(at)
     except ValueError:
         raise ValueError("receiver event time is invalid") from None
+    if parsed.tzinfo is None:
+        raise ValueError("receiver event time needs a timezone")
     return event
 
 
+class ReceiverLogFull(OSError):
+    """The log reached its size cap; the event was not recorded."""
+
+
 def write_receiver_event(path, *, case_id, run_id, method, fixed_path, bytes_sent, at):
-    """Append one allowlisted event; no header, body or query value is accepted."""
+    """Append one allowlisted event; no header, body or query value is accepted.
+
+    The file never grows past MAX_LOG_BYTES (the reader's limit): a full log
+    refuses the event with ReceiverLogFull instead of making every run unreadable.
+    """
     event = _validate({"at": at, "case_id": case_id, "run_id": run_id,
                        "method": method, "path": fixed_path, "bytes_sent": bytes_sent})
-    line = json.dumps(event, ensure_ascii=False) + "\n"
+    line = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
     with _APPEND_LOCK:
-        with Path(path).open("a", encoding="utf-8", newline="\n") as stream:
+        with Path(path).open("a+b") as stream:
+            size = stream.seek(0, os.SEEK_END)
+            # A torn tail from a crash must not swallow this event's line.
+            if size:
+                stream.seek(size - 1)
+                if stream.read(1) != b"\n":
+                    line = b"\n" + line
+                stream.seek(0, os.SEEK_END)
+            if size + len(line) > MAX_LOG_BYTES:
+                raise ReceiverLogFull("receiver log is full")
             stream.write(line)
 
 

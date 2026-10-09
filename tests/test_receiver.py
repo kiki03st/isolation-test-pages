@@ -200,3 +200,104 @@ def test_reader_rejects_unsafe_correlation_id(tmp_path, run_id):
     _write_jsonl(path, [_event()])
     with pytest.raises(ValueError):
         read_receiver_events(path, run_id)
+
+
+def _write(path, run_id="run-safe", **changes):
+    from isolation_tests.receiver import write_receiver_event
+
+    values = dict(case_id="NET-01", run_id=run_id, method="GET",
+                  fixed_path="/v1/receive/NET-01", bytes_sent=2,
+                  at="2026-10-10T01:02:03+00:00")
+    values.update(changes)
+    write_receiver_event(path, **values)
+
+
+def test_writer_refuses_events_past_the_reader_limit(tmp_path, monkeypatch):
+    from isolation_tests import receiver
+
+    path = tmp_path / "receiver.jsonl"
+    line_size = len(json.dumps(_event()) + "\n")
+    monkeypatch.setattr(receiver, "MAX_LOG_BYTES", line_size * 3 + 10)
+    for _ in range(3):
+        _write(path)
+    before = path.read_bytes()
+    with pytest.raises(receiver.ReceiverLogFull):
+        _write(path)
+    assert path.read_bytes() == before
+    assert len(receiver.read_receiver_events(path, "run-safe")) == 3
+
+
+def test_real_cap_leaves_log_readable_after_flood(tmp_path, monkeypatch):
+    from isolation_tests import receiver
+
+    path = tmp_path / "receiver.jsonl"
+    monkeypatch.setattr(receiver, "MAX_LOG_BYTES", 2048)
+    refused = 0
+    for index in range(100):
+        try:
+            _write(path, run_id=f"flood-{index}")
+        except receiver.ReceiverLogFull:
+            refused += 1
+    assert refused > 0 and path.stat().st_size <= 2048
+    assert receiver.read_receiver_events(path, "flood-0")
+
+
+def test_torn_tail_does_not_swallow_the_next_event(tmp_path):
+    path = tmp_path / "receiver.jsonl"
+    path.write_bytes(b'{"run_id":"torn')
+    _write(path)
+    lines = path.read_bytes().split(b"\n")
+    assert json.loads(lines[1])["run_id"] == "run-safe"
+
+
+def test_reader_rejects_naive_timestamp(tmp_path):
+    from isolation_tests.receiver import read_receiver_events
+
+    path = tmp_path / "receiver.jsonl"
+    _write_jsonl(path, [_event(at="2026-10-10T01:02:03")])
+    with pytest.raises(ValueError):
+        read_receiver_events(path, "run-safe")
+
+
+def test_full_log_never_answers_success(fixture_server, monkeypatch, capfd):
+    from isolation_tests import receiver
+
+    monkeypatch.setattr(receiver, "MAX_LOG_BYTES", 10)
+    response = httpx.get(fixture_server.base + "/v1/receive/NET-01?run_id=run-full", trust_env=False)
+    assert response.status_code == 503
+    assert "ReceiverLogFull" in capfd.readouterr().err
+
+
+def test_unwritable_log_never_answers_success(fixture_server_factory, tmp_path, capfd):
+    # A directory as the log path makes every append fail.
+    server = fixture_server_factory(log_path=tmp_path)
+    response = httpx.get(server.base + "/v1/receive/NET-01?run_id=run-bad", trust_env=False)
+    assert response.status_code == 503
+    assert "route=receiver-log" in capfd.readouterr().err
+
+
+def test_unexpected_handler_error_is_visible_without_request_data(
+    fixture_server, monkeypatch, capfd,
+):
+    from isolation_tests import fixture_server as module
+
+    def broken(*args):
+        raise RuntimeError("synthetic-secret-message")
+
+    monkeypatch.setitem(module._REGISTRY, ("HTTP-01", "403"), broken)
+    response = httpx.get(fixture_server.base + "/v1/cases/HTTP-01/403?x=synthetic-query", trust_env=False)
+    assert response.status_code == 500
+    err = capfd.readouterr().err
+    assert "RuntimeError" in err and "route=route" in err
+    assert "synthetic-secret-message" not in err and "synthetic-query" not in err
+
+
+def test_get_with_body_closes_connection(fixture_server):
+    import socket
+
+    with socket.create_connection(("127.0.0.1", fixture_server.server.server_port), timeout=2) as sock:
+        sock.sendall(b"GET /healthz HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhello")
+        data = b""
+        while chunk := sock.recv(4096):
+            data += chunk
+    assert b"connection: close" in data.lower()
