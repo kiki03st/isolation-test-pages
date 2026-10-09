@@ -233,6 +233,24 @@ def evaluate(case: CaseSpec, variant: str, page: CollectedPage | None, evidence:
     return outcome("passed", "observed_expectations_met", **regions)
 
 
+def merge_analysis(case: CaseSpec, variant: str, base: Outcome, analysis: Outcome | None) -> Outcome:
+    """Combine the evidence result with the AI adapter result; the worse one wins.
+
+    A case with a deterministic analysis contract cannot pass without an analysis
+    result. Cases without one are returned unchanged.
+    """
+    contract = case.expected_analysis.get("variants", {}).get(variant)
+    if not isinstance(contract, dict) or contract.get("final_state") is None:
+        return base
+    if analysis is None:
+        return Outcome(base.case_id, base.variant, "failed" if base.status == "failed" else "blocked",
+                       "analysis_missing" if base.status != "failed" else base.reason,
+                       {**base.details, "base_status": base.status})
+    worst = min((base, analysis), key=lambda item: _PRIORITY.index(item.status))
+    return Outcome(base.case_id, base.variant, worst.status, worst.reason,
+                   {**base.details, "analysis": dict(analysis.details), "base_status": base.status})
+
+
 @lru_cache(maxsize=1)
 def _canonical_variants() -> dict[str, tuple[str, ...]]:
     from .manifest import load_cases
