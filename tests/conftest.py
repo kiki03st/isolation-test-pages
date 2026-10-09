@@ -279,3 +279,39 @@ def configured_collector(monkeypatch):
         collector_url="https://collector.example.invalid/collect",
         token_env="TEST_ONLY_TOKEN",
     )
+
+
+@pytest.fixture
+def backend_case():
+    from isolation_tests.manifest import load_cases
+
+    cases = load_cases(REPO_ROOT / "tools" / "isolation-tests" / "cases.json")
+    return next(case for case in cases if case.id == "INT-03")
+
+
+@pytest.fixture
+def write_backend_contract(tmp_path):
+    """Write a synthetic contract derived from the documented example."""
+    def write(**overrides):
+        example = json.loads(
+            (REPO_ROOT / "tools" / "isolation-tests" / "backend-contract.example.json")
+            .read_text(encoding="utf-8"))
+        path = tmp_path / "backend-contract.json"
+        path.write_text(json.dumps(example | overrides), encoding="utf-8")
+        return path
+
+    return write
+
+
+@pytest.fixture
+def configured_backend(write_backend_contract):
+    """Documented configuration pointing at a synthetic backend; result fields stay null."""
+    from dataclasses import replace
+
+    from isolation_tests.config import load_config
+
+    contract = write_backend_contract(submit_url="https://backend.example.invalid/skill")
+    return replace(
+        load_config(REPO_ROOT / "tools" / "isolation-tests" / "config.example.json"),
+        backend_contract=contract,
+    )
