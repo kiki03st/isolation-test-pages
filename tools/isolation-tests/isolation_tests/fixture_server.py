@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import ipaddress
+import gzip
 import json
 import mimetypes
 import os
@@ -11,7 +12,9 @@ import socket
 import ssl
 import sys
 import stat
+import threading
 import time
+import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,10 +22,50 @@ from pathlib import Path
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 from .fixtures import (
-    NET_VARIANTS, SAMPLE_BYTES, render_http, render_network, render_static,
+    LIMIT_BASES, MAX_FIXTURE_BYTES, NET_VARIANTS, SAMPLE_BYTES, boundary_html, bulk_body,
+    render_http, render_network, render_resource, render_static,
 )
 from .receiver import RECEIVER_CASES, RUN_ID, write_receiver_event
 from .targets import normalize_base
+
+
+MAX_BODY_BYTES = MAX_FIXTURE_BYTES  # compressed and decompressed alike
+MAX_SECONDS = 20  # start delay and stream lifetime
+MAX_ACTIVE = 4  # concurrently handled connections; there is no application queue
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _check_seconds(value, low_open: bool = False) -> None:
+    if not _is_number(value) or not (0 < value if low_open else 0 <= value) or value > MAX_SECONDS:
+        raise ValueError("fixture time limit")
+
+
+def _check_decompressed(headers, body: bytes) -> None:
+    encodings = [value.strip().lower() for name, value in headers
+                 if name.lower() == "content-encoding"]
+    if not encodings:
+        return
+    if encodings != ["gzip"]:
+        raise ValueError("only gzip bodies can be size-checked")
+    try:
+        unpacker = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        data = unpacker.decompress(body, MAX_BODY_BYTES + 1)
+    except zlib.error:
+        raise ValueError("gzip body is not valid") from None
+    if len(data) > MAX_BODY_BYTES or unpacker.unconsumed_tail:
+        raise ValueError("fixture size limit")
+
+
+def bounded_chunks(body: bytes, chunk_size: int):
+    """Split a body of at most 8 MiB; invalid sizes are rejected before any output."""
+    if (not isinstance(body, bytes) or len(body) > MAX_BODY_BYTES
+            or isinstance(chunk_size, bool) or not isinstance(chunk_size, int)
+            or chunk_size < 1):
+        raise ValueError("fixture size limit")
+    return (body[start:start + chunk_size] for start in range(0, len(body), chunk_size))
 
 
 @dataclass(frozen=True)
@@ -35,6 +78,20 @@ class ResponsePlan:
     chunk_size: int = 4096
     max_duration_s: float = 20
     close_early: bool = False
+    stream: bool = False  # no Content-Length: the body ends when the connection closes
+
+    def __post_init__(self):
+        if isinstance(self.status, bool) or not isinstance(self.status, int):
+            raise ValueError("status must be an integer")
+        _check_seconds(self.start_delay_s)
+        _check_seconds(self.chunk_interval_s)
+        _check_seconds(self.max_duration_s, low_open=True)
+        if (isinstance(self.chunk_size, bool) or not isinstance(self.chunk_size, int)
+                or not 1 <= self.chunk_size <= MAX_BODY_BYTES):
+            raise ValueError("chunk_size must be a positive integer")
+        if not isinstance(self.body, bytes) or len(self.body) > MAX_BODY_BYTES:
+            raise ValueError("fixture size limit")
+        _check_decompressed(self.headers, self.body)
 
 
 @dataclass(frozen=True)
@@ -144,6 +201,13 @@ def _net06_script(name, targets, run_id):
     return _plan(200, body.encode("utf-8"), "text/javascript; charset=utf-8")
 
 
+SLOW_STREAM_BODY = b"slow-stream-chunk\n"  # one byte per second, 17 intervals
+
+
+def _boundary_plan(metric: str, offset: int) -> ResponsePlan:
+    return _plan(200, boundary_html(metric, LIMIT_BASES[metric] + offset))
+
+
 def _build_registry():
     """(case_id, variant) -> builder(targets, run_id, hop). Later tasks add entries."""
     registry = {}
@@ -170,6 +234,24 @@ def _build_registry():
         200, render_http("HTTP-02", "invalid-utf8"))
     registry[("HTTP-02", "truncated")] = lambda t, r, h: _plan(
         200, render_http("HTTP-02", "truncated"), close_early=True)
+    registry[("LIM-01", "delay-15s")] = lambda t, r, h: _plan(
+        200, render_static("COL-01", "default"), start_delay_s=15)
+    registry[("LIM-02", "slow-stream")] = lambda t, r, h: _plan(
+        200, SLOW_STREAM_BODY, _TEXT, chunk_size=1, chunk_interval_s=1, stream=True)
+    registry[("LIM-03", "large")] = lambda t, r, h: _plan(
+        200, bulk_body(MAX_BODY_BYTES), chunk_size=65536)
+    registry[("LIM-03", "length-small")] = lambda t, r, h: _plan(
+        200, bulk_body(262144), _HTML, ("Content-Length", "1024"), chunk_size=65536)
+    registry[("LIM-03", "length-large")] = lambda t, r, h: _plan(
+        200, bulk_body(262144), _HTML, ("Content-Length", "263168"), chunk_size=65536)
+    registry[("LIM-03", "gzip")] = lambda t, r, h: _plan(
+        200, gzip.compress(bulk_body(MAX_BODY_BYTES), mtime=0), _HTML,
+        ("Content-Encoding", "gzip"), chunk_size=65536)
+    for metric in LIMIT_BASES:
+        registry[("LIM-04", metric)] = lambda t, r, h, m=metric: _boundary_plan(m, 0)
+    for variant in ("dom-growth", "cpu-bursts"):
+        registry[("LIM-05", variant)] = (
+            lambda t, r, h, v=variant: _plan(200, render_resource(v)))
     registry[("DL-02", "attachment")] = lambda t, r, h: _plan(
         200, SAMPLE_BYTES, "application/octet-stream",
         ("Content-Disposition", 'attachment; filename="sample.apk"'))
@@ -184,7 +266,8 @@ def is_registered(case_id: str, variant: str) -> bool:
 
 
 def response_plan(case_id: str, variant: str, targets: dict[str, str], *,
-                  run_id: str | None = None, hop: int | None = None) -> ResponsePlan:
+                  run_id: str | None = None, hop: int | None = None,
+                  offset: int | None = None) -> ResponsePlan:
     """Return the fixed response for one registered route.
 
     ValueError means the route needs setup that is absent; RequestRejected
@@ -194,6 +277,10 @@ def response_plan(case_id: str, variant: str, targets: dict[str, str], *,
         builder = _REGISTRY[(case_id, variant)]
     except KeyError:
         raise ValueError("unregistered case or variant") from None
+    if case_id == "LIM-04":
+        if offset not in {None, -1, 0, 1}:
+            raise RequestRejected("offset must be -1, 0 or 1")
+        return _boundary_plan(variant, offset or 0)
     return builder(targets if isinstance(targets, dict) else {}, run_id, hop)
 
 
@@ -267,34 +354,45 @@ class _Handler(BaseHTTPRequestHandler):
         self._respond(_plan(code, b"", _TEXT), close=True)
 
     def _respond(self, plan: ResponsePlan, close=False) -> int:
-        """Write a response; return the number of body bytes actually sent."""
-        limit = max(plan.max_duration_s, 0)
-        deadline = time.monotonic() + limit
+        """Write a response; return the number of body bytes actually sent.
+
+        Every wait uses the server's injected monotonic clock. The whole exchange
+        (start delay plus streaming) ends at plan.max_duration_s, which
+        ResponsePlan caps at 20 seconds.
+        """
+        now, sleep = self.server.now, self.server.sleep
+        deadline = now() + plan.max_duration_s
         if plan.start_delay_s > 0:
-            time.sleep(min(plan.start_delay_s, limit))
+            sleep(min(plan.start_delay_s, max(deadline - now(), 0)))
+            if now() > deadline:
+                # The budget is spent: answer with nothing but a gateway timeout.
+                plan, close = _plan(504, b"", _TEXT), True
         body = plan.body
-        if close or plan.close_early:
+        declared = {name.lower(): value for name, value in plan.headers}.get("content-length")
+        if close or plan.close_early or plan.stream or declared is not None:
             self.close_connection = True
-        self.send_response(plan.status)
-        for name, value in plan.headers:
-            self.send_header(name, value)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        if self.close_connection:
-            self.send_header("Connection", "close")
-        self.end_headers()
-        data = body[: len(body) // 2] if plan.close_early else body
-        step = max(plan.chunk_size, 1)
         sent = 0
         try:
-            while sent < len(data):
-                chunk = data[sent: sent + step]
+            self.send_response(plan.status)
+            for name, value in plan.headers:
+                self.send_header(name, value)
+            if not plan.stream and declared is None:
+                self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            data = body[: len(body) // 2] if plan.close_early else body
+            for chunk in bounded_chunks(data, plan.chunk_size):
                 self.wfile.write(chunk)
                 sent += len(chunk)
                 if sent < len(data) and plan.chunk_interval_s > 0:
-                    time.sleep(plan.chunk_interval_s)
-                if time.monotonic() > deadline:
+                    remaining = deadline - now()
+                    if remaining <= 0:
+                        break
+                    sleep(min(plan.chunk_interval_s, remaining))
+                if now() > deadline:
                     self.close_connection = True
                     break
             self.wfile.flush()
@@ -307,7 +405,7 @@ class _Handler(BaseHTTPRequestHandler):
         """Return run_id/hop; a repeated parameter becomes '' so it fails validation."""
         pairs = parse_qsl(query, keep_blank_values=True)
         found = {}
-        for name in ("run_id", "hop"):
+        for name in ("run_id", "hop", "offset"):
             values = [value for key, value in pairs if key == name]
             found[name] = values[0] if len(values) == 1 else (None if not values else "")
         return found
@@ -352,9 +450,14 @@ class _Handler(BaseHTTPRequestHandler):
             if not re.fullmatch(r"[0-9]{1,2}", found["hop"]):
                 return self._status(400)
             hop = int(found["hop"])
+        offset = None
+        if found["offset"] is not None:
+            if found["offset"] not in {"-1", "0", "1"}:
+                return self._status(400)
+            offset = int(found["offset"])
         try:
             plan = response_plan(case_id, variant, self.server.fixture_config.targets,
-                                 run_id=found["run_id"], hop=hop)
+                                 run_id=found["run_id"], hop=hop, offset=offset)
         except RequestRejected:
             plan = _plan(400, b"", _TEXT)
         except ValueError:
@@ -424,6 +527,72 @@ class _TLSHandler(_Handler):
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
+    # Kernel listen backlog only: connections the OS has accepted but this process has
+    # not yet seen. It is not an application queue; excess work is rejected with 503.
+    request_queue_size = 8
+    active = 0
+    max_active = MAX_ACTIVE
+    now = staticmethod(time.monotonic)
+    sleep = staticmethod(time.sleep)
+    on_slot_change = None
+
+    def _slots_changed(self):
+        if self.on_slot_change is not None:
+            try:
+                self.on_slot_change(self.active)
+            except Exception as error:
+                _diagnose("slot-callback", error)
+
+    def acquire_slot(self) -> bool:
+        """Non-blocking; a failure means the caller must reject, never wait."""
+        with self._slot_lock:
+            if self.active >= self.max_active:
+                return False
+            self.active += 1
+            self._slots_changed()
+            return True
+
+    def release_slot(self) -> None:
+        with self._slot_lock:
+            self.active -= 1
+            self._slots_changed()
+
+    def process_request(self, request, client_address):
+        # Decide before any thread exists: a rejected connection costs no handler.
+        if not self.acquire_slot():
+            self._reject_busy(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.release_slot()
+            self.shutdown_request(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            # The connection is already closed here, so a freed slot is a usable slot.
+            self.release_slot()
+
+    def _reject_busy(self, request):
+        try:
+            if not isinstance(request, ssl.SSLSocket):
+                # Consume the request first; closing over unread data may reset the
+                # connection and destroy the 503 before the client reads it.
+                request.settimeout(0.2)
+                try:
+                    request.recv(65536)
+                except OSError:
+                    pass
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
+                    b"Retry-After: 1\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+        except OSError:
+            pass
+        finally:
+            self.shutdown_request(request)
 
     def handle_error(self, request, client_address):
         _diagnose("connection", sys.exc_info()[1])
@@ -440,15 +609,20 @@ def _is_loopback(host: str) -> bool:
         return host.lower().rstrip(".") == "localhost"
 
 
-def make_server(config: FixtureConfig) -> _Server:
-    """Validate configuration, then bind. Nothing is bound on a configuration error."""
+def make_server(config: FixtureConfig, *, now=time.monotonic, sleep=time.sleep,
+                on_slot_change=None) -> _Server:
+    """Validate configuration, then bind. Nothing is bound on a configuration error.
+
+    now/sleep/on_slot_change are in-process test hooks; there is no HTTP admin route.
+    """
     if bool(config.tls_cert) != bool(config.tls_key):
         raise ValueError("tls_cert and tls_key must be configured together")
     tls = bool(config.tls_cert)
     if not _is_loopback(config.host) and not tls:
         raise ValueError("binding beyond loopback requires TLS")
-    if config.max_active < 1:
-        raise ValueError("max_active must be positive")
+    if (isinstance(config.max_active, bool) or not isinstance(config.max_active, int)
+            or not 1 <= config.max_active <= MAX_ACTIVE):
+        raise ValueError(f"max_active must be an integer from 1 to {MAX_ACTIVE}")
     static = _load_static(config.static_root) if config.static_root is not None else None
     context = None
     if tls:
@@ -461,6 +635,9 @@ def make_server(config: FixtureConfig) -> _Server:
         server.socket = context.wrap_socket(
             server.socket, server_side=True, do_handshake_on_connect=False)
     server.fixture_config = config
+    server.max_active = config.max_active
+    server.now, server.sleep, server.on_slot_change = now, sleep, on_slot_change
+    server._slot_lock = threading.Lock()
     server.static_files = static
     return server
 

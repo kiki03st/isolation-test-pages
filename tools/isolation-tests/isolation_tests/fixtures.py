@@ -496,3 +496,185 @@ def render_http(case_id: str, variant: str) -> bytes:
         return _HTTP_PAGES[(case_id, variant)]
     except KeyError:
         raise ValueError("unregistered HTTP case or variant") from None
+
+
+# --- limit fixtures (LIM-03/04/05) ---------------------------------------
+
+MAX_FIXTURE_BYTES = 8 * 1024 * 1024
+HTML_BYTES_LIMIT = 131_072
+LIMIT_BASES = {
+    "bytes": HTML_BYTES_LIMIT,
+    "elements": 2_000,
+    "text": 16_000,
+    "depth": 64,
+    "result": 262_144,
+}
+_RESULT_MAX_LINKS = 1_500
+_RESULT_SEARCH_COUNTS = (1_500, 1_200, 1_000, 800, 600, 400, 200)
+
+_BOUNDARY_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
+                  "<title>{title}</title></head><body>")
+_BOUNDARY_TAIL = "</body></html>"
+
+
+def _boundary_value(metric, value) -> int:
+    if metric not in LIMIT_BASES:
+        raise ValueError("unknown boundary metric")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("boundary value must be a positive integer")
+    ceiling = MAX_FIXTURE_BYTES if metric == "bytes" else HTML_BYTES_LIMIT
+    if metric == "result":
+        ceiling = MAX_FIXTURE_BYTES
+    if value > ceiling:
+        raise ValueError("boundary value is beyond the fixture ceiling")
+    return value
+
+
+def _link_page(count: int, pad: int, tail: int) -> str:
+    """count document links padded by `pad`, then a note of exactly 1 + `tail` characters.
+
+    Each link's href is serialized twice by the AI (attribute and evidence), so the
+    note, which is serialized once, supplies the one-byte granularity.
+    """
+    links = "".join(
+        f'<a href="https://example.invalid/{index}/{"a" * pad}">파일</a>'
+        for index in range(count)
+    )
+    return (_BOUNDARY_HEAD.format(title="결과") + "<main>" + links
+            + "<p>x" + "a" * tail + "</p>"
+            + '<form action="./unsubmitted" method="post"><input name="q" type="text"></form>'
+            + "</main>" + _BOUNDARY_TAIL)
+
+
+def _serialized_inspection_size(page, html: str) -> int:
+    from dataclasses import asdict
+
+    result = page.inspect_html(html)
+    return len(json.dumps(asdict(result), ensure_ascii=False,
+                          separators=(",", ":")).encode("utf-8"))
+
+
+def _calibrated_result_page(value: int) -> str | None:
+    """Exact-size DOM candidate measured with the installed AI, or None when absent."""
+    try:
+        import ai.page as page
+    except ImportError:
+        return None
+    saved = (page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS)
+    page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS = MAX_FIXTURE_BYTES, 10
+    try:
+        for count in _RESULT_SEARCH_COUNTS:
+            def size(pad, extra=0, count=count):
+                return _serialized_inspection_size(page, _link_page(count, pad, extra))
+
+            if size(0) > value:
+                continue
+            low, high = 0, 64
+            if size(high) <= value:
+                continue
+            while high - low > 1:
+                middle = (low + high) // 2
+                low, high = (middle, high) if size(middle) <= value else (low, middle)
+            remainder = value - size(low)
+            if remainder >= 4 * count:
+                continue
+            html = _link_page(count, low, remainder)
+            if (len(html.encode("utf-8")) <= HTML_BYTES_LIMIT
+                    and _serialized_inspection_size(page, html) == value):
+                return html
+        raise ValueError("result boundary is not reachable with this fixture DOM")
+    finally:
+        page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS = saved
+
+
+def boundary_html(metric: str, value: int) -> bytes:
+    """HTML whose independently measured `metric` equals `value` exactly.
+
+    bytes: UTF-8 length. elements: every source element including the document
+    wrappers. text: visible characters. depth: maximum source element depth.
+    result: a fixed DOM candidate; only an installed AI can confirm the
+    serialized inspection size, otherwise the candidate is uncalibrated.
+    """
+    value = _boundary_value(metric, value)
+    if metric == "bytes":
+        frame = (_BOUNDARY_HEAD.format(title="경계") + "<p>" + "</p>" + _BOUNDARY_TAIL)
+        filler = value - len(frame.encode("utf-8"))
+        if filler < 0:
+            raise ValueError("size is below the smallest boundary document")
+        html = _BOUNDARY_HEAD.format(title="경계") + "<p>" + "a" * filler + "</p>" + _BOUNDARY_TAIL
+    elif metric == "elements":
+        if value < 5:
+            raise ValueError("a document needs at least 5 elements")
+        html = _BOUNDARY_HEAD.format(title="") + "<i></i>" * (value - 5) + _BOUNDARY_TAIL
+    elif metric == "text":
+        # html, head, meta, title, body, p: the empty title adds no characters.
+        html = _BOUNDARY_HEAD.format(title="") + "<p>" + "가" * value + "</p>" + _BOUNDARY_TAIL
+    elif metric == "depth":
+        if value < 3:
+            raise ValueError("a document is at least 3 levels deep")
+        levels = value - 2
+        html = _BOUNDARY_HEAD.format(title="") + "<div>" * levels + "</div>" * levels + _BOUNDARY_TAIL
+    else:
+        html = _calibrated_result_page(value)
+        if html is None:
+            count = max(1, min(_RESULT_MAX_LINKS, value // 250))
+            html = _link_page(count, 8, 0)
+    body = html.encode("utf-8")
+    if metric != "bytes" and len(body) > HTML_BYTES_LIMIT:
+        raise ValueError("boundary document would exceed the HTML byte limit")
+    return body
+
+
+def _padded(prefix: bytes, suffix: bytes, size: int) -> bytes:
+    filler = size - len(prefix) - len(suffix)
+    if filler < 0 or size > MAX_FIXTURE_BYTES:
+        raise ValueError("fixture size limit")
+    return prefix + b"A" * filler + suffix
+
+
+_BULK_PREFIX = '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>대용량</title></head><body><pre>'.encode("utf-8")
+_BULK_SUFFIX = b"</pre></body></html>"
+
+
+def bulk_body(size: int) -> bytes:
+    """Valid HTML of exactly `size` bytes (never above 8 MiB)."""
+    return _padded(_BULK_PREFIX, _BULK_SUFFIX, size)
+
+
+_DOM_GROWTH_SCRIPT = """<script>
+(function () {
+  var host = document.getElementById("grow"), added = 0, step = 0;
+  function grow() {
+    var fragment = document.createDocumentFragment();
+    for (var i = 0; i < 100; i++) {
+      var node = document.createElement("div");
+      node.textContent = "n" + added++;
+      fragment.appendChild(node);
+    }
+    host.appendChild(fragment);
+    if (++step < 20) setTimeout(grow, 10);
+  }
+  grow();
+})();
+</script>"""
+
+_CPU_BURST_SCRIPT = """<script>
+(function () {
+  var bursts = 0;
+  function burst() {
+    var start = performance.now(), guard = 0;
+    while (performance.now() - start < 50 && guard++ < 20000000) {}
+    if (++bursts < 40) setTimeout(burst, 20);
+  }
+  burst();
+})();
+</script>"""
+
+
+def render_resource(variant: str) -> bytes:
+    """LIM-05: finite DOM growth (2,000 nodes) or 40 bursts of 50 ms."""
+    if variant == "dom-growth":
+        return _document("유한 DOM 증가", '<main id="grow"></main>' + _DOM_GROWTH_SCRIPT)
+    if variant == "cpu-bursts":
+        return _document("유한 계산 부하", _CPU_BURST_SCRIPT)
+    raise ValueError("unregistered resource variant")
