@@ -507,3 +507,104 @@ def test_managed_output_hardlink_cannot_mutate_an_external_file(tmp_path):
     with pytest.raises(ValueError):
         build_site((make_case(),), output, "b" * 40)
     assert outside.read_bytes() == original
+
+
+def test_unrelated_catalog_with_similar_top_level_keys_preserves_the_entire_site(tmp_path):
+    from isolation_tests.build_pages import build_site
+
+    output = tmp_path / "site"
+    output.mkdir()
+    sentinel_catalog = b'{"version":1,"commit_sha":"personal notes","cases":"unrelated catalog","files":{}}'
+    (output / "catalog.json").write_bytes(sentinel_catalog)
+    (output / "notes.txt").write_bytes(b"personal notes must remain")
+    before = {path.relative_to(output).as_posix(): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError):
+        build_site((make_case(),), output, COMMIT_SHA)
+    after = {path.relative_to(output).as_posix(): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+    assert before == after
+
+
+@pytest.mark.parametrize("malformation", [
+    "sha", "boolean-version", "case-list", "case-fields", "case-id", "case-group", "variant-fields",
+    "variant-name", "variant-path", "variant-hash", "null-hash", "file-traversal",
+    "file-hash", "extra-ownership", "missing-file", "alias-hash", "duplicate-case",
+])
+def test_malformed_catalog_cannot_grant_file_ownership_or_mutate_site(tmp_path, malformation):
+    from isolation_tests.build_pages import build_site
+
+    output = tmp_path / "site"
+    build_site((make_case(),), output, COMMIT_SHA)
+    catalog_path = output / "catalog.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    case = catalog["cases"][0]
+    variant = case["variants"][0]
+    if malformation == "sha":
+        catalog["commit_sha"] = "notes"
+    elif malformation == "boolean-version":
+        catalog["version"] = True
+    elif malformation == "case-list":
+        catalog["cases"] = "unrelated"
+    elif malformation == "case-fields":
+        case.pop("title")
+    elif malformation == "case-id":
+        case["id"] = "../personal"
+    elif malformation == "case-group":
+        case["group"] = "personal_notes"
+    elif malformation == "variant-fields":
+        variant["notes"] = "personal"
+    elif malformation == "variant-name":
+        variant["name"] = "../personal"
+    elif malformation == "variant-path":
+        variant["path"] = "../personal.html"
+    elif malformation == "variant-hash":
+        variant["sha256"] = "0" * 64
+    elif malformation == "null-hash":
+        variant["sha256"] = None
+    elif malformation == "file-traversal":
+        catalog["files"]["../personal.html"] = "0" * 64
+    elif malformation == "file-hash":
+        catalog["files"][variant["path"]] = "notes"
+    elif malformation == "extra-ownership":
+        catalog["files"]["notes.txt"] = hashlib.sha256(b"personal notes must remain").hexdigest()
+    elif malformation == "missing-file":
+        catalog["files"].pop(variant["path"])
+    elif malformation == "alias-hash":
+        catalog["files"][case["relative_path"]] = "0" * 64
+    else:
+        catalog["cases"].append(case.copy())
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    (output / "notes.txt").write_bytes(b"personal notes must remain")
+    before = {path.relative_to(output).as_posix(): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError):
+        build_site((make_case(),), output, "b" * 40)
+    after = {path.relative_to(output).as_posix(): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+    assert before == after
+
+
+def test_recognized_full_manifest_catalog_allows_a_sha_rebuild(tmp_path):
+    from isolation_tests.build_pages import build_site
+    from isolation_tests.manifest import load_cases
+
+    cases = load_cases(Path(__file__).resolve().parents[1] / "tools/isolation-tests/cases.json")
+    output = tmp_path / "site"
+    first = build_site(cases, output, COMMIT_SHA)
+    second = build_site(cases, output, "b" * 40)
+    assert first.keys() == second.keys()
+    assert all(first[path] == second[path] for path in first if path != "catalog.json")
+    assert first["catalog.json"] != second["catalog.json"]
+    assert json.loads((output / "catalog.json").read_text(encoding="utf-8"))["commit_sha"] == "b" * 40
+
+
+def test_duplicate_catalog_keys_are_rejected_without_changing_any_files(tmp_path):
+    from isolation_tests.build_pages import build_site
+
+    output = tmp_path / "site"
+    build_site((make_case(),), output, COMMIT_SHA)
+    catalog_path = output / "catalog.json"
+    original = catalog_path.read_text(encoding="utf-8")
+    catalog_path.write_text(original.replace('"version": 1', '"version": 0, "version": 1'), encoding="utf-8")
+    before = {path.relative_to(output).as_posix(): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError):
+        build_site((make_case(),), output, "b" * 40)
+    after = {path.relative_to(output).as_posix(): path.read_bytes() for path in output.rglob("*") if path.is_file()}
+    assert before == after

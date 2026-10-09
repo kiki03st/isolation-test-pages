@@ -15,6 +15,16 @@ from .model import CaseSpec
 
 _CASE_ID = re.compile(r"(?:COL|NAV|ANA|NET|SES|DL|HTTP|LIM|HOST|INT|REC)-[0-9]{2}\Z")
 _VARIANT = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_PUBLIC_CASE_FIELDS = {
+    "id", "group", "title", "description", "execution_kind", "target_key",
+    "relative_path", "message", "risk_level", "max_requests", "variants",
+}
+_PUBLIC_GROUPS = (
+    "collection", "navigation", "analysis", "network", "session", "download",
+    "http", "limits", "host", "integration", "recovery",
+)
 _DEFAULT_MANIFEST = Path(__file__).resolve().parents[1] / "cases.json"
 _DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "test-pages"
 
@@ -51,6 +61,76 @@ def _json_bytes(value: object) -> bytes:
 
 def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _matches(pattern: re.Pattern, value: object) -> bool:
+    return isinstance(value, str) and pattern.fullmatch(value) is not None
+
+
+def _catalog_files(catalog: object) -> dict[str, str]:
+    """Recognize the emitted schema before granting any file ownership."""
+    if (not isinstance(catalog, dict)
+            or set(catalog) != {"version", "commit_sha", "cases", "files"}
+            or type(catalog["version"]) is not int or catalog["version"] != 1
+            or not isinstance(catalog["commit_sha"], str)
+            or not re.fullmatch(r"[0-9a-fA-F]{40}", catalog["commit_sha"])
+            or not isinstance(catalog["cases"], list)
+            or not isinstance(catalog["files"], dict)):
+        raise ValueError("unrecognized existing catalog")
+    for relative, digest in catalog["files"].items():
+        _relative(relative)
+        if not _matches(_SHA256, digest):
+            raise ValueError("invalid catalog file hash")
+    recorded = {".nojekyll": _digest(b""), "v1/files/sample.apk": _digest(SAMPLE_BYTES)}
+    seen_ids = set()
+    for case in catalog["cases"]:
+        if (not isinstance(case, dict) or set(case) != _PUBLIC_CASE_FIELDS
+                or not _matches(_CASE_ID, case["id"]) or case["id"] in seen_ids
+                or any(not isinstance(case[key], str) for key in ("group", "title", "description", "message"))
+                or case["group"] not in _PUBLIC_GROUPS
+                or not case["title"].strip() or not case["description"].strip()
+                or case["execution_kind"] not in ("page", "http_fixture", "host_probe", "integration")
+                or case["risk_level"] not in ("basic", "explicit")
+                or type(case["max_requests"]) is not int or case["max_requests"] <= 0
+                or (case["target_key"] is not None and not _matches(_NAME, case["target_key"]))
+                or not isinstance(case["variants"], list) or not case["variants"]):
+            raise ValueError("invalid catalog case record")
+        seen_ids.add(case["id"])
+        if case["relative_path"] is not None:
+            _relative(case["relative_path"])
+        folder = f'v1/cases/{case["id"].lower()}'
+        if case["execution_kind"] == "page" and case["relative_path"] != f"{folder}/index.html":
+            raise ValueError("invalid catalog case path")
+        seen_variants = set()
+        for variant in case["variants"]:
+            if (not isinstance(variant, dict) or set(variant) != {"name", "path", "sha256"}
+                    or not _matches(_VARIANT, variant["name"]) or variant["name"] in seen_variants):
+                raise ValueError("invalid catalog variant record")
+            seen_variants.add(variant["name"])
+            path, digest = variant["path"], variant["sha256"]
+            if path is None:
+                if digest is not None:
+                    raise ValueError("unimplemented variant has a recorded hash")
+                continue
+            _relative(path)
+            if (case["execution_kind"] != "page" or path != f'{folder}/{variant["name"]}.html'
+                    or not _matches(_SHA256, digest)):
+                raise ValueError("invalid catalog variant path or hash")
+            recorded[path] = digest
+            if len(case["variants"]) == 1:
+                recorded[case["relative_path"]] = digest
+    if catalog["files"] != recorded:
+        raise ValueError("catalog file ownership disagrees with case records")
+    return catalog["files"]
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate catalog key")
+        result[key] = value
+    return result
 
 
 def build_site(cases: tuple[CaseSpec, ...], output: Path, commit_sha: str) -> dict[str, str]:
@@ -113,11 +193,8 @@ def build_site(cases: tuple[CaseSpec, ...], output: Path, commit_sha: str) -> di
     previous_files = {}
     if catalog_path.exists():
         try:
-            previous = json.loads(catalog_path.read_text(encoding="utf-8"))
-            if (set(previous) != {"version", "commit_sha", "cases", "files"}
-                    or previous["version"] != 1 or not isinstance(previous["files"], dict)):
-                raise ValueError("unrecognized existing catalog")
-            previous_files = previous["files"]
+            previous = json.loads(catalog_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+            previous_files = _catalog_files(previous)
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as error:
             raise ValueError("unrecognized existing catalog") from error
     for relative, content in payloads.items():
