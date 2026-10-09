@@ -189,11 +189,8 @@ def test_app_install_page_mismatch_is_reported_not_concealed(cases):
     """The current AI does not classify the sample.apk link; the case must say so."""
     pytest.importorskip("ai")
     outcome = run(cases["ANA-04"], "default", sample("ana-04", "default"))
-    wanted = "앱 다운로드 링크"
-    if wanted in outcome.details["doubts"]:
-        return
     assert outcome.status == "failed"
-    assert f"required_doubt:{wanted}" in outcome.details["mismatches"]
+    assert "required_doubt:앱 다운로드 링크" in outcome.details["mismatches"]
 
 
 def test_response_result_flag_is_recorded(cases):
@@ -292,11 +289,17 @@ def test_boundary_constants_come_from_the_ai(metric, limit):
 
 @pytest.mark.parametrize("metric, code", [("bytes", "input_too_large"), ("elements", "partial_content"),
                                           ("text", "partial_content"), ("depth", "partial_content")])
-def test_one_past_the_limit_reports_its_failure_code(metric, code):
+def test_limit_and_under_are_processed_in_full_and_one_past_reports_its_code(metric, code):
     pytest.importorskip("ai")
-    rows = boundary_results(metric)["rows"]
+    result = boundary_results(metric)
+    rows = result["rows"]
+    for row in rows[:2]:
+        assert row["failure"] is None
+        assert row["text_chars"] > 0 and row["elements"] > 0
     assert rows[2]["failure"] == code
-    assert all(row["failure"] != code for row in rows[:2])
+    if metric != "bytes":  # the byte gate discards the page; the others keep evidence
+        assert rows[2]["text_chars"] > 0 and rows[2]["elements"] > 0
+    assert result["boundary_results_ok"] is True
 
 
 def test_text_boundary_preserves_the_limited_text():
@@ -313,12 +316,20 @@ def test_boundary_outcome_reports_facts_for_evaluation(cases):
     assert outcome.details["facts"]["boundary_limit"] == 16000
 
 
-def test_result_boundary_failure_is_reported_not_hidden(cases):
-    """The result sample at limit-1/limit already trips the AI's stricter budget."""
+def test_result_boundary_is_a_reported_product_mismatch(cases):
+    """ai/page.py budgets with the partial_content string, so limit-1 and limit are partial."""
     pytest.importorskip("ai")
     outcome = run(cases["LIM-04"], "result", None)
-    assert outcome.status in {"passed", "failed"}
-    assert outcome.details["facts"]["boundary_results_ok"] is (outcome.status == "passed")
+    assert (outcome.status, outcome.reason) == ("failed", "result_boundary_product_mismatch")
+    assert outcome.details["facts"]["boundary_results_ok"] is False
+    assert [r["failure"] for r in outcome.details["rows"]] == ["partial_content"] * 3
+    assert all(r["elements"] > 0 for r in outcome.details["rows"])
+
+
+def test_elements_and_depth_samples_are_not_empty_inputs():
+    pytest.importorskip("ai")
+    for metric in ("elements", "depth", "bytes"):
+        assert all(r["failure"] != "empty_input" for r in boundary_results(metric)["rows"])
 
 
 # --- merging with the evidence-based result (evaluate.py) -----------------------------

@@ -515,6 +515,11 @@ _RESULT_SEARCH_COUNTS = (1_500, 1_200, 1_000, 800, 600, 400, 200)
 _BOUNDARY_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
                   "<title>{title}</title></head><body>")
 _BOUNDARY_TAIL = "</body></html>"
+# Visible text (one chunk) and one inspected doubt (an empty document link), so a
+# surviving inspection is observable at every boundary. The link adds no text.
+_BOUNDARY_PROBE_TEXT = "합성 조회 안내"
+_BOUNDARY_PROBE_LINK = '<a href="https://example.invalid/f.pdf"></a>'
+_BOUNDARY_PROBE = "<p>" + _BOUNDARY_PROBE_TEXT + "</p>" + _BOUNDARY_PROBE_LINK
 
 
 def _boundary_value(metric, value) -> int:
@@ -614,23 +619,34 @@ def boundary_html(metric: str, value: int) -> bytes:
     """
     value = _boundary_value(metric, value)
     if metric == "bytes":
-        frame = (_BOUNDARY_HEAD.format(title="경계") + "<p>" + "</p>" + _BOUNDARY_TAIL)
+        # Visible text and a doubt element come first; the padding is an HTML
+        # comment, so only the byte limit (not the text cap) is exercised.
+        frame = (_BOUNDARY_HEAD.format(title="경계") + _BOUNDARY_PROBE + "<!---->" + _BOUNDARY_TAIL)
         filler = value - len(frame.encode("utf-8"))
         if filler < 0:
             raise ValueError("size is below the smallest boundary document")
-        html = _BOUNDARY_HEAD.format(title="경계") + "<p>" + "a" * filler + "</p>" + _BOUNDARY_TAIL
+        html = (_BOUNDARY_HEAD.format(title="경계") + _BOUNDARY_PROBE
+                + "<!--" + "a" * filler + "-->" + _BOUNDARY_TAIL)
     elif metric == "elements":
-        if value < 5:
-            raise ValueError("a document needs at least 5 elements")
-        html = _BOUNDARY_HEAD.format(title="") + "<i></i>" * (value - 5) + _BOUNDARY_TAIL
+        # html, head, meta, title, body, the probe's p and a.
+        if value < 7:
+            raise ValueError("a document needs at least 7 elements")
+        html = (_BOUNDARY_HEAD.format(title="") + _BOUNDARY_PROBE
+                + "<i></i>" * (value - 7) + _BOUNDARY_TAIL)
     elif metric == "text":
-        # html, head, meta, title, body, p: the empty title adds no characters.
-        html = _BOUNDARY_HEAD.format(title="") + "<p>" + "가" * value + "</p>" + _BOUNDARY_TAIL
+        # The probe's text counts toward the total.
+        filler = value - len(_BOUNDARY_PROBE_TEXT)
+        if filler < 1:
+            raise ValueError("text length is below the smallest boundary document")
+        html = (_BOUNDARY_HEAD.format(title="") + _BOUNDARY_PROBE_LINK
+                + "<p>" + _BOUNDARY_PROBE_TEXT + "가" * filler + "</p>" + _BOUNDARY_TAIL)
     elif metric == "depth":
         if value < 3:
             raise ValueError("a document is at least 3 levels deep")
+        # The probe is 3 levels deep (body > a); nesting follows it.
         levels = value - 2
-        html = _BOUNDARY_HEAD.format(title="") + "<div>" * levels + "</div>" * levels + _BOUNDARY_TAIL
+        html = (_BOUNDARY_HEAD.format(title="") + _BOUNDARY_PROBE
+                + "<div>" * levels + "</div>" * levels + _BOUNDARY_TAIL)
     else:
         html = _calibrated_result_page(value)
     body = html.encode("utf-8")

@@ -23,6 +23,7 @@ _BENIGN_PAGE = "<main><p>합성 조회 결과입니다. 조치할 내용이 없�
 _PROPOSED_CODES = ("install_prompt", "credential_request", "remote_control")
 _LIMIT_FAILURE = {"bytes": "input_too_large"}  # other metrics: partial_content
 _OFFSETS = [-1, 0, 1]
+_TIMEOUT_RETRIES = 5
 
 
 class AIUnavailable(RuntimeError):
@@ -275,16 +276,28 @@ def boundary_results(metric: str) -> dict:
             html = boundary_html(metric, limit + offset).decode("utf-8")
         except CalibrationUnavailable:
             raise AIUnavailable() from None
-        inspected = ai.page.inspect_html(html)
-        rows.append({"offset": offset, "html_bytes": len(html.encode("utf-8")),
+        # The AI's 100 ms cooperative budget can expire on a loaded machine; that says
+        # nothing about the size limit, so such a measurement is repeated.
+        for attempt in range(1, _TIMEOUT_RETRIES + 1):
+            inspected = ai.page.inspect_html(html)
+            if inspected.failure is not ai.types.FailureCode.TIMEOUT:
+                break
+        rows.append({"offset": offset, "attempts": attempt,
+                     "html_bytes": len(html.encode("utf-8")),
                      "failure": inspected.failure.value if inspected.failure else None,
                      "text_chars": len(inspected.text), "elements": len(inspected.elements)})
     code = _LIMIT_FAILURE.get(metric, "partial_content")
-    ok = all((row["failure"] == code) == (row["offset"] > 0) for row in rows)
+    # At and under the limit the sample is processed in full: no failure, and the
+    # visible text and the doubt element survive. One past it, the limit's own
+    # failure code is reported and (except for the byte gate, which discards the
+    # page) the inspected text and element are still preserved.
+    under, over = rows[:2], rows[2]
+    ok = all(r["failure"] is None and r["text_chars"] > 0 and r["elements"] > 0 for r in under)
+    ok = ok and over["failure"] == code
+    if metric != "bytes":
+        ok = ok and over["text_chars"] > 0 and over["elements"] > 0
     if metric == "text":
         ok = ok and [r["text_chars"] for r in rows] == [limit - 1, limit, limit]
-    if metric == "result":
-        ok = ok and rows[2]["elements"] > 0
     return {"boundary_offsets": list(_OFFSETS), "boundary_limit": limit,
             "boundary_results_ok": ok, "rows": rows}
 
@@ -295,6 +308,9 @@ def _limit_outcome(case: CaseSpec, variant: str) -> Outcome:
     except AIUnavailable:
         return _blocked(case.id, variant, "ai_unavailable")
     facts = {"analysis": True, **{k: v for k, v in result.items() if k != "rows"}}
+    # The AI reserves room for the partial_content failure string, so a clean result
+    # sample can be at most a few bytes under 262,144: a product-vs-spec mismatch.
+    failed = "result_boundary_product_mismatch" if variant == "result" else "boundary_mismatch"
     status, reason = (("passed", "boundaries_observed") if result["boundary_results_ok"]
-                      else ("failed", "boundary_mismatch"))
+                      else ("failed", failed))
     return Outcome(case.id, variant, status, reason, {"facts": facts, "rows": result["rows"]})
