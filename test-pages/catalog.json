@@ -1086,6 +1086,9 @@
   "commit_sha": "d6f94b7572bc4f3e710bcdb37f8e410aae295c48",
   "files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "assets/catalog.js": "b57ed250375665d6a88e455ea652369c00e020b255d1050a34f51fdd56db94f9",
+    "assets/styles.css": "1e0894dcac663681bde642a00104908aac04315a400ebaefb3d2a665231ea657",
+    "index.html": "438e812620922e064b31c01251ee5fced40d98965ed8f356f163d157dba23e1f",
     "v1/cases/ana-01/default.html": "07bffde43cae92cfb8f1fc15455e9c3ca50ee1a6ccd62a7f04d9a191c59a7687",
     "v1/cases/ana-01/index.html": "07bffde43cae92cfb8f1fc15455e9c3ca50ee1a6ccd62a7f04d9a191c59a7687",
     "v1/cases/ana-02/default.html": "88159c9a3503ac75b56bc193301f25317b83397614a86cb1e0e4a9c463f2f6a8",
