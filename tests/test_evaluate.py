@@ -426,20 +426,45 @@ def test_unexpected_remote_failure_is_not_collection_success(cases):
 def _concurrency_facts(**changes):
     return {"positive_control_ok": True, "remote_job_terminated": True, "children_remaining": 0,
             "recovery_ok": True, "concurrency_limit_known": True, "limit_plus_one_sent": True,
-            "concurrency_limit_ok": True, "queue_limit_ok": True, **changes}
+            "concurrency_limit_ok": True, "queue_limit_ok": True,
+            "concurrency_limit": 3, "fixture_max_active": 4, **changes}
 
 
 @pytest.mark.parametrize("changes", [
     {"concurrency_limit_known": False}, {"limit_plus_one_sent": False},
-    {"concurrency_limit": 8}, {"concurrency_limit": 0}, {"concurrency_limit": True},
+    {"concurrency_limit": 0}, {"concurrency_limit": "3"},
+    {"concurrency_limit": True}, {"fixture_max_active": True},
+    {"fixture_max_active": 0}, {"fixture_max_active": 5},
+    {"concurrency_limit": 4, "fixture_max_active": 4},
+    {"concurrency_limit": 3, "fixture_max_active": 3},
 ])
 def test_unknown_or_unexceedable_concurrency_limit_is_insufficient_load(cases, changes):
     result = _run(cases["LIM-06"], "concurrency", _concurrency_facts(**changes))
     assert result.status == "blocked"
 
 
-def test_concurrency_limit_within_fixture_load_can_pass(cases):
-    result = _run(cases["LIM-06"], "concurrency", _concurrency_facts(concurrency_limit=7))
+@pytest.mark.parametrize("missing", ["concurrency_limit", "fixture_max_active"])
+def test_missing_concurrency_load_facts_are_insufficient_load(cases, missing):
+    facts = _concurrency_facts()
+    del facts[missing]
+    result = _run(cases["LIM-06"], "concurrency", facts)
+    assert (result.status, result.reason) == ("blocked", "insufficient_fixture_load")
+
+
+def test_limit_plus_one_over_eight_is_insufficient_load(cases, monkeypatch):
+    # The fixture caps at 4, so exercise the 8-trial ceiling with a raised fixture cap.
+    from isolation_tests import evaluate as module
+
+    monkeypatch.setattr(module, "MAX_FIXTURE_ACTIVE", 16)
+    for limit, expected in ((7, "passed"), (8, "blocked")):
+        facts = _concurrency_facts(concurrency_limit=limit, fixture_max_active=16)
+        assert _run(cases["LIM-06"], "concurrency", facts).status == expected
+
+
+@pytest.mark.parametrize("limit,fixture", [(1, 2), (3, 4), (2, 4)])
+def test_concurrency_limit_within_fixture_load_can_pass(cases, limit, fixture):
+    result = _run(cases["LIM-06"], "concurrency",
+                  _concurrency_facts(concurrency_limit=limit, fixture_max_active=fixture))
     assert result.status == "passed"
 
 

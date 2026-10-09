@@ -21,6 +21,8 @@ from .receiver import RUN_ID
 
 CANONICAL_MANIFEST = Path(__file__).resolve().parents[1] / "cases.json"
 MAX_CONCURRENT_TRIALS = 8
+# The fixture server processes at most 4 requests at once and queues none.
+MAX_FIXTURE_ACTIVE = 4
 
 # Controls prove the trial could have succeeded; without them a "block" proves nothing.
 CONTROL_FACTS = ("positive_control_ok", "receiver_control_ok")
@@ -145,11 +147,14 @@ def _deadline_checks(facts: dict, evidence: Evidence, page: CollectedPage | None
             blockers.append("runner_ended_before_deadline")
 
 
-def _concurrency_checks(facts: dict, blockers: list) -> None:
-    limit = facts.get("concurrency_limit")
-    if "concurrency_limit" not in facts:
+def _concurrency_checks(required: tuple[str, ...], facts: dict, blockers: list) -> None:
+    """A collector limit the fixture cannot exceed is unproven: limit+1 <= min(8, fixture)."""
+    if "limit_plus_one_sent" not in required and "concurrency_limit" not in facts:
         return
-    if type(limit) is not int or limit < 1 or limit + 1 > MAX_CONCURRENT_TRIALS:
+    limit, fixture = facts.get("concurrency_limit"), facts.get("fixture_max_active")
+    if (type(limit) is not int or limit < 1
+            or type(fixture) is not int or not 1 <= fixture <= MAX_FIXTURE_ACTIVE
+            or limit + 1 > min(MAX_CONCURRENT_TRIALS, fixture)):
         blockers.append("insufficient_fixture_load")
 
 
@@ -219,7 +224,7 @@ def evaluate(case: CaseSpec, variant: str, page: CollectedPage | None, evidence:
         else:
             _page_checks(assertions, page, facts, failures, blockers)
     _deadline_checks(facts, evidence, page, failures, blockers)
-    _concurrency_checks(facts, blockers)
+    _concurrency_checks(required, facts, blockers)
 
     if failures:
         return outcome("failed", failures[0], failures=failures, blockers=blockers, **regions)

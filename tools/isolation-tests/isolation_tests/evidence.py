@@ -235,7 +235,8 @@ def receiver_observed(evidence: Evidence, events: tuple[dict, ...]) -> bool | No
     unguessable run_id. Returns True when this run's request reached the receiver
     inside the observation window, False when no event exists, and None (proves
     nothing) when any event belongs elsewhere, lies outside the window allowing
-    one second of clock difference, or the clock offset is unknown/too large.
+    one second of clock difference, or a recorded ``clock_offset_seconds`` is
+    malformed or exceeds one second. An absent offset is treated as aligned.
     """
     try:
         started, ended = window(evidence)
