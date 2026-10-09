@@ -2,6 +2,7 @@
 
 import json
 import re
+import threading
 from html import escape
 
 
@@ -509,7 +510,6 @@ LIMIT_BASES = {
     "depth": 64,
     "result": 262_144,
 }
-_RESULT_MAX_LINKS = 1_500
 _RESULT_SEARCH_COUNTS = (1_500, 1_200, 1_000, 800, 600, 400, 200)
 
 _BOUNDARY_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
@@ -554,12 +554,29 @@ def _serialized_inspection_size(page, html: str) -> int:
                           separators=(",", ":")).encode("utf-8"))
 
 
-def _calibrated_result_page(value: int) -> str | None:
-    """Exact-size DOM candidate measured with the installed AI, or None when absent."""
+class CalibrationUnavailable(ValueError):
+    """The result boundary cannot be confirmed (no AI package, or not reachable)."""
+
+
+# One calibration at a time: it temporarily raises caps on the shared AI module, so
+# concurrent callers must never interleave. Results are cached per requested size.
+_CALIBRATION_LOCK = threading.Lock()
+_CALIBRATED: dict[int, str] = {}
+
+
+def _calibrated_result_page(value: int) -> str:
+    """Exact-size DOM candidate measured with the installed AI; never an uncalibrated guess."""
+    with _CALIBRATION_LOCK:
+        if value not in _CALIBRATED:
+            _CALIBRATED[value] = _calibrate_result_page(value)
+        return _CALIBRATED[value]
+
+
+def _calibrate_result_page(value: int) -> str:
     try:
         import ai.page as page
     except ImportError:
-        return None
+        raise CalibrationUnavailable("result boundary needs the installed AI package") from None
     saved = (page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS)
     page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS = MAX_FIXTURE_BYTES, 10
     try:
@@ -582,7 +599,7 @@ def _calibrated_result_page(value: int) -> str | None:
             if (len(html.encode("utf-8")) <= HTML_BYTES_LIMIT
                     and _serialized_inspection_size(page, html) == value):
                 return html
-        raise ValueError("result boundary is not reachable with this fixture DOM")
+        raise CalibrationUnavailable("result boundary is not reachable with this fixture DOM")
     finally:
         page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS = saved
 
@@ -592,8 +609,8 @@ def boundary_html(metric: str, value: int) -> bytes:
 
     bytes: UTF-8 length. elements: every source element including the document
     wrappers. text: visible characters. depth: maximum source element depth.
-    result: a fixed DOM candidate; only an installed AI can confirm the
-    serialized inspection size, otherwise the candidate is uncalibrated.
+    result: a fixed DOM candidate calibrated against the installed AI; without
+    it CalibrationUnavailable (a ValueError) is raised, never a guessed sample.
     """
     value = _boundary_value(metric, value)
     if metric == "bytes":
@@ -616,9 +633,6 @@ def boundary_html(metric: str, value: int) -> bytes:
         html = _BOUNDARY_HEAD.format(title="") + "<div>" * levels + "</div>" * levels + _BOUNDARY_TAIL
     else:
         html = _calibrated_result_page(value)
-        if html is None:
-            count = max(1, min(_RESULT_MAX_LINKS, value // 250))
-            html = _link_page(count, 8, 0)
     body = html.encode("utf-8")
     if metric != "bytes" and len(body) > HTML_BYTES_LIMIT:
         raise ValueError("boundary document would exceed the HTML byte limit")

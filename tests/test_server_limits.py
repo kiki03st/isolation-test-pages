@@ -307,3 +307,96 @@ def test_real_slow_stream_stops_within_twenty_seconds(server_base):
             pass
     assert chunks >= 2
     assert 1 <= time.monotonic() - started <= 21
+
+
+# --- fix round 1: lifetime, one slot per request, unavailable calibration -----
+
+def _raw_get(base, path, extra=b""):
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(base)
+    connection = socket.create_connection((parts.hostname, parts.port), timeout=3)
+    connection.sendall(
+        f"GET {path} HTTP/1.1\r\nHost: {parts.netloc}\r\n".encode("ascii") + extra + b"\r\n"
+    )
+    return connection
+
+
+def test_keep_alive_is_refused_so_one_slot_is_one_request(running_server):
+    from isolation_tests.fixture_server import FixtureConfig
+
+    with running_server(FixtureConfig(max_active=1)) as base:
+        connection = _raw_get(base, "/healthz")  # HTTP/1.1 default would be keep-alive
+        try:
+            received = bytearray()
+            while chunk := connection.recv(65536):
+                received.extend(chunk)  # EOF proves the server ended the connection
+            assert b"connection: close" in bytes(received).lower()
+            base.slots.wait_for(0)  # the client socket is still open here
+            assert httpx.get(base + "/healthz", trust_env=False, timeout=1).status_code == 200
+        finally:
+            connection.close()
+
+
+def test_trickled_request_cannot_hold_a_slot_past_the_read_budget(running_server, monkeypatch):
+    from isolation_tests import fixture_server
+
+    monkeypatch.setattr(fixture_server._Handler, "read_budget_s", 0.5)
+    with running_server(fixture_server.FixtureConfig(max_active=1)) as base:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(base)
+        with socket.create_connection((parts.hostname, parts.port), timeout=3) as connection:
+            connection.sendall(b"GET /heal")  # never finished
+            base.slots.wait_for(1)
+            base.slots.wait_for(0, timeout=4)
+        assert httpx.get(base + "/healthz", trust_env=False, timeout=1).status_code == 200
+
+
+def test_non_reading_client_cannot_stretch_the_response_lifetime(running_server, monkeypatch):
+    from isolation_tests import fixture_server
+    from urllib.parse import urlsplit
+
+    plan = fixture_server.ResponsePlan(
+        200, (("Content-Type", "text/plain"),), b"x" * MAX_BODY,
+        chunk_size=65536, max_duration_s=1,
+    )
+    monkeypatch.setitem(fixture_server._REGISTRY, ("LIM-03", "large"), lambda t, r, h: plan)
+    with running_server(fixture_server.FixtureConfig(max_active=1)) as base:
+        parts = urlsplit(base)
+        connection = socket.socket()
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        connection.settimeout(3)
+        connection.connect((parts.hostname, parts.port))
+        try:
+            started = time.monotonic()
+            connection.sendall(
+                f"GET /v1/cases/LIM-03/large HTTP/1.1\r\nHost: {parts.netloc}\r\n\r\n".encode("ascii"))
+            base.slots.wait_for(0, timeout=5)  # the handler's own send timeout is 10 s
+            elapsed = time.monotonic() - started
+        finally:
+            connection.close()
+        assert 0.8 <= elapsed <= 4, f"blocked send must end at the 1 s deadline, took {elapsed:.2f}s"
+        assert httpx.get(base + "/healthz", trust_env=False, timeout=1).status_code == 200
+
+
+def test_uncalibrated_result_boundary_fails_explicitly(running_server, monkeypatch):
+    import sys
+    from isolation_tests import fixtures, fixture_server
+
+    monkeypatch.setitem(sys.modules, "ai.page", None)  # import raises ImportError
+    monkeypatch.setattr(fixtures, "_CALIBRATED", {})
+    with pytest.raises(ValueError):
+        fixtures.boundary_html("result", 262144)
+    with running_server(fixture_server.FixtureConfig()) as base:
+        for offset in (-1, 0, 1):
+            response = httpx.get(f"{base}/v1/cases/LIM-04/result?offset={offset}", trust_env=False)
+            assert response.status_code == 503 and response.content == b""
+        assert httpx.get(f"{base}/v1/cases/LIM-04/bytes?offset=1", trust_env=False).status_code == 200
+
+
+def test_boolean_offset_is_rejected():
+    from isolation_tests.fixture_server import RequestRejected, response_plan
+
+    with pytest.raises(RequestRejected):
+        response_plan("LIM-04", "bytes", {}, offset=True)

@@ -85,6 +85,8 @@ def test_invalid_or_unbounded_boundary_requests_are_rejected(metric, value):
 def test_result_fixture_is_a_dom_candidate_not_html_size_padding(value):
     from isolation_tests.fixtures import boundary_html
 
+    # Without the AI package a result sample is refused, never guessed (fix round 1).
+    pytest.importorskip("ai.page", reason="blocked: optional AI package absent")
     body = boundary_html("result", value)
     measured = DOMMetrics(body.decode("utf-8", errors="strict"))
     assert len(body) <= 131072
@@ -158,3 +160,28 @@ def test_resource_script_finishes_with_bounded_load(browser, variant):
             assert observed["callbacks"] <= 40
     finally:
         page.close()
+
+
+def test_result_calibration_is_serialized_cached_and_restores_ai_caps(monkeypatch):
+    from threading import Thread
+
+    page = pytest.importorskip("ai.page", reason="blocked: optional AI package absent")
+    from isolation_tests import fixtures
+
+    monkeypatch.setattr(fixtures, "_CALIBRATED", {})
+    before = (page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS)
+    calls = []
+    original = page.inspect_html
+    monkeypatch.setattr(page, "inspect_html", lambda html: calls.append(1) or original(html))
+    results = []
+    threads = [Thread(target=lambda: results.append(fixtures.boundary_html("result", 262144)))
+               for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert len(results) == 6 and len(set(results)) == 1
+    assert (page.MAX_INSPECTION_BYTES, page.INSPECTION_TIMEOUT_SECONDS) == before
+    measured = len(calls)
+    fixtures.boundary_html("result", 262144)
+    assert len(calls) == measured, "a calibrated size must be cached, not re-measured"

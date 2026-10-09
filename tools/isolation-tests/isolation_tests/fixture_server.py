@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import io
 import ipaddress
 import gzip
 import json
@@ -278,7 +279,7 @@ def response_plan(case_id: str, variant: str, targets: dict[str, str], *,
     except KeyError:
         raise ValueError("unregistered case or variant") from None
     if case_id == "LIM-04":
-        if offset not in {None, -1, 0, 1}:
+        if isinstance(offset, bool) or offset not in {None, -1, 0, 1}:
             raise RequestRejected("offset must be -1, 0 or 1")
         return _boundary_plan(variant, offset or 0)
     return builder(targets if isinstance(targets, dict) else {}, run_id, hop)
@@ -340,15 +341,44 @@ def _diagnose(label: str, error: BaseException | None) -> None:
         pass
 
 
+class _BudgetReader(socket.SocketIO):
+    """Socket reader whose every receive is limited by one shared deadline."""
+
+    deadline = None
+
+    def readinto(self, buffer):
+        if self.deadline is not None:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("request read budget exhausted")
+            self._sock.settimeout(remaining)
+        return super().readinto(buffer)
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 10
+    read_budget_s = 10  # whole time allowed to deliver the request line and headers
     server_version = "IsolationFixture"
     sys_version = ""
 
     # Nothing about a request may reach stderr or exceptions.
     def log_message(self, *args):
         pass
+
+    def setup(self):
+        super().setup()
+        # A trickled request must not hold a slot: reads share one overall budget.
+        self.rfile.close()
+        self._raw_reader = _BudgetReader(self.connection, "rb")
+        self._raw_reader.deadline = time.monotonic() + self.read_budget_s
+        self.rfile = io.BufferedReader(self._raw_reader, io.DEFAULT_BUFFER_SIZE)
+
+    def _request_read(self):
+        """The request is complete; the read budget no longer applies."""
+        reader = getattr(self, "_raw_reader", None)
+        if reader is not None:
+            reader.deadline = None
 
     def send_error(self, code, message=None, explain=None):
         self._respond(_plan(code, b"", _TEXT), close=True)
@@ -361,6 +391,9 @@ class _Handler(BaseHTTPRequestHandler):
         ResponsePlan caps at 20 seconds.
         """
         now, sleep = self.server.now, self.server.sleep
+        self._request_read()
+        # One slot is one request: never keep the connection for a next one.
+        self.close_connection = True
         deadline = now() + plan.max_duration_s
         if plan.start_delay_s > 0:
             sleep(min(plan.start_delay_s, max(deadline - now(), 0)))
@@ -369,10 +402,9 @@ class _Handler(BaseHTTPRequestHandler):
                 plan, close = _plan(504, b"", _TEXT), True
         body = plan.body
         declared = {name.lower(): value for name, value in plan.headers}.get("content-length")
-        if close or plan.close_early or plan.stream or declared is not None:
-            self.close_connection = True
         sent = 0
         try:
+            self._bound_write(deadline - now())
             self.send_response(plan.status)
             for name, value in plan.headers:
                 self.send_header(name, value)
@@ -380,11 +412,12 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            if self.close_connection:
-                self.send_header("Connection", "close")
+            self.send_header("Connection", "close")
             self.end_headers()
             data = body[: len(body) // 2] if plan.close_early else body
             for chunk in bounded_chunks(data, plan.chunk_size):
+                # A client that stops reading must not stretch the lifetime past the deadline.
+                self._bound_write(deadline - now())
                 self.wfile.write(chunk)
                 sent += len(chunk)
                 if sent < len(data) and plan.chunk_interval_s > 0:
@@ -400,6 +433,12 @@ class _Handler(BaseHTTPRequestHandler):
             self.close_connection = True
         return sent
 
+    def _bound_write(self, remaining: float) -> None:
+        """Limit the next blocking send to the time left; OSError ends the response."""
+        if remaining <= 0:
+            raise TimeoutError("response lifetime exhausted")
+        self.connection.settimeout(min(remaining, self.timeout))
+
     @staticmethod
     def _query(query: str) -> dict:
         """Return run_id/hop; a repeated parameter becomes '' so it fails validation."""
@@ -414,9 +453,7 @@ class _Handler(BaseHTTPRequestHandler):
         return self._respond(_plan(code, b"", _TEXT))
 
     def do_GET(self):
-        # A GET body is never read; closing keeps it from being parsed as the next request.
-        if self.headers.get("Content-Length", "0").strip() not in {"", "0"}                 or "Transfer-Encoding" in self.headers:
-            self.close_connection = True
+        self._request_read()
         try:
             return self._route()
         except Exception as error:
@@ -465,6 +502,7 @@ class _Handler(BaseHTTPRequestHandler):
         return self._respond(plan)
 
     def _reject(self):
+        self._request_read()
         # The request body is never read; closing the connection discards it.
         parts = urlsplit(self.path)
         segments = parts.path.split("/")
