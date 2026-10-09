@@ -17,6 +17,11 @@ from ..model import CollectedPage, RuntimeConfig
 
 
 HARD_RESPONSE_BYTES = 1024 * 1024
+# Setup failures: a prerequisite is missing, not a collection result.
+PREPARATION_CODES = frozenset({
+    "collector_not_configured", "token_missing", "token_invalid",
+    "ca_file_unusable", "collector_url_invalid",
+})
 TOKEN_MODES = frozenset({"valid", "missing", "wrong"})
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _TOKEN = re.compile(r"[\x21-\x7e]{1,4096}\Z")
@@ -135,10 +140,7 @@ async def _post(client: httpx.AsyncClient, config: RuntimeConfig, url: str,
         "POST", config.collector_url, json={"url": url},
         headers={"accept-encoding": "identity"} | headers,
     )
-    try:
-        response = await client.send(request, stream=True, follow_redirects=False)
-    except httpx.HTTPError as error:
-        raise CollectionError(_classify_transport(error)) from None
+    response = await client.send(request, stream=True, follow_redirects=False)
     try:
         status = response.status_code
         if 300 <= status < 400:
@@ -151,17 +153,13 @@ async def _post(client: httpx.AsyncClient, config: RuntimeConfig, url: str,
             raise CollectionError("unexpected_status")
         limit = min(config.limits.get("runner_response_bytes", HARD_RESPONSE_BYTES),
                     HARD_RESPONSE_BYTES)
-        try:
-            raw = await read_limited(response, int(limit))
-        except httpx.HTTPError as error:
-            raise CollectionError(_classify_transport(error)) from None
-        return _parse(raw)
+        return _parse(await read_limited(response, int(limit)))
     finally:
         await response.aclose()
 
 
-async def collect(config: RuntimeConfig, url: str, token_mode: str = "valid", *,
-                  client: httpx.AsyncClient | None = None) -> CollectedPage:
+async def _collect(config: RuntimeConfig, url: str, token_mode: str,
+                   client: httpx.AsyncClient | None) -> CollectedPage:
     if token_mode not in TOKEN_MODES:
         raise CollectionError("invalid_token_mode")
     if not config.collector_url:
@@ -170,17 +168,39 @@ async def collect(config: RuntimeConfig, url: str, token_mode: str = "valid", *,
     limits = config.limits
     # Collector deadline + measurement margin + response cleanup (default 15 s).
     budget = limits.get("collector_deadline_s", 12) + limits.get("deadline_grace_s", 1) + 2
-    try:
-        async with asyncio.timeout(budget):
-            if client is not None:
-                return await _post(client, config, url, headers)
+    async with asyncio.timeout(budget):
+        if client is not None:
+            return await _post(client, config, url, headers)
+        try:
             context = ssl.create_default_context(
                 cafile=str(config.ca_file) if config.ca_file else certifi.where())
-            async with httpx.AsyncClient(
-                verify=context, follow_redirects=False, trust_env=False,
-                timeout=budget,
-            ) as owned:
-                return await _post(owned, config, url, headers)
+        except (OSError, ssl.SSLError):
+            raise CollectionError("ca_file_unusable") from None
+        async with httpx.AsyncClient(
+            verify=context, follow_redirects=False, trust_env=False, timeout=budget,
+        ) as owned:
+            return await _post(owned, config, url, headers)
+
+
+async def collect(config: RuntimeConfig, url: str, token_mode: str = "valid", *,
+                  client: httpx.AsyncClient | None = None) -> CollectedPage:
+    """Translate every failure to a fixed code with no exception context.
+
+    The error is raised after leaving the ``except`` block, from a frame that
+    holds no credentials, so neither ``__context__`` nor traceback locals can
+    reach the token or request headers.
+    """
+    try:
+        return await _collect(config, url, token_mode, client)
+    except CollectionError as error:
+        code = error.code
     except TimeoutError:
         # The local watchdog alone does not prove the remote collection ended.
-        raise CollectionError("runner_timeout") from None
+        code = "runner_timeout"
+    except httpx.InvalidURL:
+        code = "collector_url_invalid"
+    except httpx.HTTPError as error:
+        code = _classify_transport(error)
+    except (OSError, ssl.SSLError):
+        code = "collector_request_failed"
+    raise CollectionError(code)

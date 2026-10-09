@@ -446,3 +446,46 @@ def test_real_tls_trusted_control_and_untrusted_ca_do_not_send_body(configured_c
     assert re.fullmatch(r"[a-z][a-z0-9_]{0,63}", caught.value.code)
     assert str(caught.value) == caught.value.code
     assert requests == [("/collect", f"Bearer {TOKEN}", {"url": INPUT})]
+
+
+def _assert_clean(error):
+    assert error.__context__ is None and error.__cause__ is None
+    tb = error.__traceback__
+    while tb is not None:
+        for value in tb.tb_frame.f_locals.values():
+            assert TOKEN not in repr(value) or not isinstance(value, (str, dict, bytes))
+            assert TOKEN not in str(value) if isinstance(value, (str, dict)) else True
+        tb = tb.tb_next
+
+
+def test_translated_errors_carry_no_context_or_token_in_frames(configured_collector):
+    def connect(request):
+        raise httpx.ConnectError("boom", request=request)
+
+    errors = [
+        collection_error(configured_collector, connect),
+        collection_error(configured_collector, lambda r: raw_response(status=401, raw=b"x")),
+        collection_error(configured_collector, lambda r: raw_response(raw=b"not-json")),
+        collection_error(configured_collector, lambda r: raw_response(status=503, raw=b"x")),
+    ]
+    for error in errors:
+        _assert_clean(error)
+
+
+def test_bad_ca_file_and_invalid_url_map_to_fixed_codes(configured_collector, tmp_path):
+    from isolation_tests.adapters.collector import PREPARATION_CODES, CollectionError, collect
+
+    missing = replace(configured_collector, ca_file=tmp_path / "absent.pem")
+    broken = tmp_path / "broken.pem"
+    broken.write_text("not a certificate", encoding="ascii")
+    for config in (missing, replace(configured_collector, ca_file=broken)):
+        with pytest.raises(CollectionError) as caught:
+            asyncio.run(collect(config, INPUT))
+        assert caught.value.code == "ca_file_unusable"
+        _assert_clean(caught.value)
+    bad_url = replace(configured_collector, collector_url="https://[::1/x")
+    with pytest.raises(CollectionError) as caught:
+        asyncio.run(collect(bad_url, INPUT, client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: raw_response()))))
+    assert caught.value.code == "collector_url_invalid"
+    _assert_clean(caught.value)
+    assert {"collector_not_configured", "token_missing", "token_invalid", "ca_file_unusable"} <= PREPARATION_CODES
