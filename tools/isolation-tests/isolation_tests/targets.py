@@ -45,6 +45,30 @@ def normalize_base(value: object, allow_loopback_http: bool = False) -> str:
     return f"{parts.scheme}://{parts.netloc}{path}"
 
 
+def _bare(config: RuntimeConfig, key: str) -> str:
+    if key not in config.bases:
+        raise ValueError(f"target {key!r} is not configured (preparation missing)")
+    value = normalize_base(config.bases[key], config.allow_loopback_http)
+    return value[:-1] if value.endswith("/") and urlsplit(value).path != "/" else value
+
+
+def _net07_url(variant: str, config: RuntimeConfig, run_id: str) -> str:
+    """Fixed forbidden initial inputs; never an arbitrary caller-supplied URL."""
+    if variant == "initial-private":
+        url = _bare(config, "private")
+    elif variant == "scheme":
+        url = "file:///isolation-test-only"
+    else:
+        parts = urlsplit(_bare(config, "forbidden_receiver"))
+        if variant == "userinfo":
+            netloc = f"isolation-test@{parts.netloc}"
+        else:
+            port = f":{parts.port}" if parts.port else ""
+            netloc = f"{parts.hostname.upper()}.{port}"
+        url = f"{parts.scheme}://{netloc}{parts.path}"
+    return f"{url}?run_id={run_id}"
+
+
 def case_url(case: CaseSpec, variant: str, config: RuntimeConfig, run_id: str) -> str:
     """Return the URL for one registered variant, or raise ValueError.
 
@@ -54,6 +78,8 @@ def case_url(case: CaseSpec, variant: str, config: RuntimeConfig, run_id: str) -
         raise ValueError("run_id must be 1-64 characters of letters, digits, _ or -")
     if variant not in case.variants or not _VARIANT.fullmatch(variant):
         raise ValueError("variant is not registered for this case")
+    if case.id == "NET-07":
+        return _net07_url(variant, config, run_id)
     if case.target_key is None or case.target_key not in config.bases:
         raise ValueError(f"target {case.target_key!r} is not configured (preparation missing)")
     base = normalize_base(config.bases[case.target_key], config.allow_loopback_http)
