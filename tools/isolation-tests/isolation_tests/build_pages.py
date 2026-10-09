@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 
-from .fixtures import SAMPLE_BYTES, has_static, render_static
+from .fixtures import EXTRA_FILES, SAMPLE_BYTES, has_static, render_static
 from .manifest import load_cases
 from .model import CaseSpec
 
@@ -82,6 +82,9 @@ def _catalog_files(catalog: object) -> dict[str, str]:
         if not _matches(_SHA256, digest):
             raise ValueError("invalid catalog file hash")
     recorded = {".nojekyll": _digest(b""), "v1/files/sample.apk": _digest(SAMPLE_BYTES)}
+    # Support pages were added after the first release; older catalogs omit them.
+    recorded.update({path: _digest(content) for path, content in EXTRA_FILES.items()
+                     if path in catalog["files"]})
     seen_ids = set()
     for case in catalog["cases"]:
         if (not isinstance(case, dict) or set(case) != _PUBLIC_CASE_FIELDS
@@ -148,7 +151,7 @@ def build_site(cases: tuple[CaseSpec, ...], output: Path, commit_sha: str) -> di
     _check_path(output)
     if output.exists() and not output.is_dir():
         raise ValueError("output must be a directory")
-    payloads = {".nojekyll": b"", "v1/files/sample.apk": SAMPLE_BYTES}
+    payloads = {".nojekyll": b"", "v1/files/sample.apk": SAMPLE_BYTES, **EXTRA_FILES}
     public_cases = []
     seen_ids = set()
     for case in cases:

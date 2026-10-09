@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>열린 Shadow DOM 안내</title></head><body><main><div data-test="open-shadow-host"></div><script>
+const root = document.querySelector('[data-test="open-shadow-host"]').attachShadow({mode: 'open'});
+root.innerHTML = '<p data-test="open-shadow-marker">열린 Shadow DOM 표지</p>';
+</script>
+<p>합성 테스트 자료입니다.</p></main></body></html>

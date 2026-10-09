@@ -71,8 +71,8 @@
       "variants": [
         {
           "name": "delayed",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/col-04/delayed.html",
+          "sha256": "7a0d297a68ad8f756dec9ae9205f58eec30401683650e0ecc661005531a7d0b7"
         }
       ]
     },
@@ -90,18 +90,18 @@
       "variants": [
         {
           "name": "iframe",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/col-05/iframe.html",
+          "sha256": "955c1f03951741afc72f5a7df2620822df29fb0d5264a9070af6bee545454853"
         },
         {
           "name": "open-shadow",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/col-05/open-shadow.html",
+          "sha256": "65fba232d0595b48cf3421670bbc66870f38cd7e1285afc826872a6c642a1cb2"
         },
         {
           "name": "closed-shadow",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/col-05/closed-shadow.html",
+          "sha256": "4c4479ff56b13b87c867be070f9e34dd9f5267ee723276406986f96d2c73b683"
         }
       ]
     },
@@ -119,13 +119,13 @@
       "variants": [
         {
           "name": "js",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/nav-01/js.html",
+          "sha256": "7e84d84c31b09f074446f6444f0ee74fc08771619217e9bc6e9dab9d9f748795"
         },
         {
           "name": "meta",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/nav-01/meta.html",
+          "sha256": "060eb0f0f9d7b3b1c3b2363d3755327a968e998a2da968029b38f2d3c44e17fb"
         }
       ]
     },
@@ -600,13 +600,13 @@
       "variants": [
         {
           "name": "seed",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/ses-01/seed.html",
+          "sha256": "30bde8b0106209ddbb8300dc12c4f17f4238e2c7874c360c44fd552e6a16386d"
         },
         {
           "name": "read",
-          "path": null,
-          "sha256": null
+          "path": "v1/cases/ses-01/read.html",
+          "sha256": "35ae92542d5dee220db2c357e5300b8d281bed16ad49fcfb39be79fd86ac705a"
         }
       ]
     },
@@ -1107,8 +1107,18 @@
     "v1/cases/col-02/index.html": "628f1a0d16ec9a79bbc5eeb1c36cc6b5bf6818dd2252d6911085ea1e702864ad",
     "v1/cases/col-03/default.html": "4c7090008de161cc397af0bffbd0533ecb88817341c4ddbbfc2c0a64d914b621",
     "v1/cases/col-03/index.html": "4c7090008de161cc397af0bffbd0533ecb88817341c4ddbbfc2c0a64d914b621",
+    "v1/cases/col-04/delayed.html": "7a0d297a68ad8f756dec9ae9205f58eec30401683650e0ecc661005531a7d0b7",
+    "v1/cases/col-04/index.html": "7a0d297a68ad8f756dec9ae9205f58eec30401683650e0ecc661005531a7d0b7",
+    "v1/cases/col-05/closed-shadow.html": "4c4479ff56b13b87c867be070f9e34dd9f5267ee723276406986f96d2c73b683",
+    "v1/cases/col-05/iframe-child.html": "20755fc17b58061397a68fcb7d80ded07ed56ee250ecc1c5229525cb56d95199",
+    "v1/cases/col-05/iframe.html": "955c1f03951741afc72f5a7df2620822df29fb0d5264a9070af6bee545454853",
+    "v1/cases/col-05/open-shadow.html": "65fba232d0595b48cf3421670bbc66870f38cd7e1285afc826872a6c642a1cb2",
     "v1/cases/dl-01/default.html": "7c4017647a0126c5be56fad113ec05c23e0bc0323d4cf2b3bea95538594cc17f",
     "v1/cases/dl-01/index.html": "7c4017647a0126c5be56fad113ec05c23e0bc0323d4cf2b3bea95538594cc17f",
+    "v1/cases/nav-01/js.html": "7e84d84c31b09f074446f6444f0ee74fc08771619217e9bc6e9dab9d9f748795",
+    "v1/cases/nav-01/meta.html": "060eb0f0f9d7b3b1c3b2363d3755327a968e998a2da968029b38f2d3c44e17fb",
+    "v1/cases/ses-01/read.html": "35ae92542d5dee220db2c357e5300b8d281bed16ad49fcfb39be79fd86ac705a",
+    "v1/cases/ses-01/seed.html": "30bde8b0106209ddbb8300dc12c4f17f4238e2c7874c360c44fd552e6a16386d",
     "v1/files/sample.apk": "4cef0ab181ffa422d2fa9155758d447f548cbcc2e8f920d40f1487bf91af1e4a"
   },
   "version": 1

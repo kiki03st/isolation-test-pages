@@ -93,6 +93,116 @@ _STATIC_PAGES: dict[tuple[str, str], bytes] = {
     ("DL-01", "default"): _document("자료 안내", '<p>표본 파일 안내</p>' + _DOWNLOAD_LINK),
 }
 
+_DELAYED_SCRIPT = """<script>
+setTimeout(() => {
+  const section = document.createElement('section');
+  section.dataset.test = 'js-ready';
+  section.innerHTML = '<label for="otp">동적 인증번호</label><input id="otp" name="otp">';
+  document.querySelector('main').append(section);
+}, 300);
+</script>"""
+
+_OPEN_SHADOW_SCRIPT = """<script>
+const root = document.querySelector('[data-test="open-shadow-host"]').attachShadow({mode: 'open'});
+root.innerHTML = '<p data-test="open-shadow-marker">열린 Shadow DOM 표지</p>';
+</script>"""
+
+# The closed root is created but never exposed; the page only states that its
+# contents are unconfirmed. Nothing here tries to reach into it.
+_CLOSED_SHADOW_SCRIPT = """<script>
+const root = document.querySelector('[data-test="closed-shadow-host"]').attachShadow({mode: 'closed'});
+root.innerHTML = '<p data-test="closed-shadow-marker">닫힌 Shadow DOM 표지</p>';
+</script>"""
+
+_SEED_SCRIPT = """<script>
+(async () => {
+  const value = 'isolation-test';
+  document.cookie = 'isolation_test=' + value + '; SameSite=Lax';
+  localStorage.setItem('isolation_test', value);
+  await new Promise((resolve, reject) => {
+    const open = indexedDB.open('isolation-test-db', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('seed');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('seed', 'readwrite');
+      tx.objectStore('seed').put(value, 'seed');
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  });
+  const ready = document.createElement('p');
+  ready.dataset.test = 'seed-ready';
+  ready.textContent = 'seed-ready';
+  document.querySelector('main').append(ready);
+})();
+</script>"""
+
+_READ_SCRIPT = """<script>
+(async () => {
+  const value = 'isolation-test';
+  const hasCookie = document.cookie.split('; ').includes('isolation_test=' + value);
+  const hasLocal = localStorage.getItem('isolation_test') === value;
+  let hasIndexed = false;
+  const names = (await indexedDB.databases()).map(d => d.name);
+  if (names.includes('isolation-test-db')) {
+    hasIndexed = await new Promise(resolve => {
+      const open = indexedDB.open('isolation-test-db');
+      open.onerror = () => resolve(false);
+      open.onsuccess = () => {
+        const db = open.result;
+        if (!db.objectStoreNames.contains('seed')) { db.close(); resolve(false); return; }
+        const get = db.transaction('seed').objectStore('seed').get('seed');
+        get.onsuccess = () => { db.close(); resolve(get.result === value); };
+        get.onerror = () => { db.close(); resolve(false); };
+      };
+    });
+  }
+  const result = document.createElement('p');
+  result.dataset.test = 'session-result';
+  result.textContent = (hasCookie || hasLocal || hasIndexed) ? 'retained' : 'empty';
+  document.querySelector('main').append(result);
+})();
+</script>"""
+
+_NAV_TARGET = "../col-01/index.html"
+
+_DYNAMIC_PAGES: dict[tuple[str, str], bytes] = {
+    ("COL-04", "delayed"): _document(
+        "지연 생성 안내", "<p>잠시 후 입력란이 나타납니다.</p>", head=_DELAYED_SCRIPT,
+    ),
+    ("COL-05", "iframe"): _document(
+        "iframe 안내", '<p>아래 프레임에 별도 표지가 있습니다.</p>'
+        '<iframe src="iframe-child.html" title="동일 사이트 프레임"></iframe>',
+    ),
+    ("COL-05", "open-shadow"): _document(
+        "열린 Shadow DOM 안내", '<div data-test="open-shadow-host"></div>' + _OPEN_SHADOW_SCRIPT,
+    ),
+    ("COL-05", "closed-shadow"): _document(
+        "닫힌 Shadow DOM 안내",
+        '<div data-test="closed-shadow-host">닫힌 Shadow DOM 호스트</div>'
+        '<p>닫힌 Shadow DOM 내부 내용은 미확인입니다.</p>' + _CLOSED_SHADOW_SCRIPT,
+    ),
+    ("NAV-01", "js"): _document(
+        "이동 중", "<p>이동 중입니다.</p>",
+        head=f"<script>location.replace('{_NAV_TARGET}');</script>",
+    ),
+    ("NAV-01", "meta"): _document(
+        "이동 중", "<p>이동 중입니다.</p>",
+        head=f'<meta http-equiv="refresh" content="0; url={_NAV_TARGET}">',
+    ),
+    ("SES-01", "seed"): _document("저장소 표본 기록", "<p>합성 값을 저장합니다.</p>" + _SEED_SCRIPT),
+    ("SES-01", "read"): _document("저장소 표본 확인", "<p>저장된 값을 확인합니다.</p>" + _READ_SCRIPT),
+}
+_STATIC_PAGES.update(_DYNAMIC_PAGES)
+
+# Fixed support pages: always published, referenced by relative URL only.
+EXTRA_FILES: dict[str, bytes] = {
+    "v1/cases/col-05/iframe-child.html": _document(
+        "프레임 내부", '<p data-test="iframe-marker">프레임 내부 표지</p>',
+    ),
+}
+
 
 def has_static(case_id: str, variant: str) -> bool:
     """Whether this release implements the exact static variant."""

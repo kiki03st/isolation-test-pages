@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>지연 생성 안내</title><script>
+setTimeout(() => {
+  const section = document.createElement('section');
+  section.dataset.test = 'js-ready';
+  section.innerHTML = '<label for="otp">동적 인증번호</label><input id="otp" name="otp">';
+  document.querySelector('main').append(section);
+}, 300);
+</script></head><body><main><p>잠시 후 입력란이 나타납니다.</p>
+<p>합성 테스트 자료입니다.</p></main></body></html>
