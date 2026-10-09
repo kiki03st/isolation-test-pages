@@ -1,0 +1,13 @@
+.worktrees/
+.superpowers/
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+config.local.json
+results/
+evidence/
+*.pem
+*.key
+*.log
+.env*
