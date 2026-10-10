@@ -276,7 +276,12 @@ async def _analysis_page(case: CaseSpec, variant: str, config: RuntimeConfig, ob
             obs.notes["pair_collection_error"] = code
             return
         paired = await ANALYZE(case, other, page)
-    obs.facts["paired_verdict_equal"] = ai_adapter.paired_verdicts_equal(obs.analysis, paired)
+    equal = ai_adapter.paired_verdicts_equal(obs.analysis, paired)
+    if equal is None:
+        # A blocked side (AI unavailable) is a missing prerequisite, never a mismatch.
+        obs.notes["pair_analysis_blocked"] = paired.reason if paired.status == "blocked" else obs.analysis.reason
+        return
+    obs.facts["paired_verdict_equal"] = equal
 
 
 async def _int01(case, variant, config, obs, mode) -> None:
@@ -562,6 +567,9 @@ def judge(case: CaseSpec, variant: str, obs: Observation, config: RuntimeConfig)
     if case.id in HOST_CASES and (admin is not None or probe is not None):
         outcome = combine(outcome, validate_host_evidence(case.id, evidence), "host_evidence")
     outcome = merge_analysis(case, variant, outcome, obs.analysis)
+    pair_blocked = obs.notes.get("pair_analysis_blocked")
+    if isinstance(pair_blocked, str) and outcome.status != "failed":
+        outcome = Outcome(case.id, variant, "blocked", pair_blocked, dict(outcome.details))
     outcome = combine(outcome, obs.backend, "backend", prefer_other=True)
     if case.recovery_case is not None and obs.actions:
         recovery = None if obs.recovery is None else Outcome(

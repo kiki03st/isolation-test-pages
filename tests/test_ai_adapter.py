@@ -272,7 +272,9 @@ def test_pair_with_different_verdict_is_not_equal():
                     {"verdict": {"final_state": "inconclusive", "reason_code": "not_in_whitelist"},
                      "accepted_codes": []})
     assert paired_verdicts_equal(base, other) is False
-    assert paired_verdicts_equal(base, Outcome("ANA-07", "i", "blocked", "x", {})) is False
+    # A blocked side proves nothing about equality: no fact (final review #2).
+    assert paired_verdicts_equal(base, Outcome("ANA-07", "i", "blocked", "x", {})) is None
+    assert paired_verdicts_equal(Outcome("ANA-07", "b", "blocked", "x", {}), base) is None
 
 
 # --- LIM-04 ----------------------------------------------------------------
@@ -371,3 +373,11 @@ def test_merge_analysis_ignores_cases_without_an_analysis_contract(cases):
 
     base = Outcome("COL-01", "default", "passed", "ok", {})
     assert merge_analysis(cases["COL-01"], "default", base, None) is base
+
+
+def test_merge_analysis_reports_the_analysis_cause_when_both_are_blocked(cases):
+    from isolation_tests.evaluate import merge_analysis
+
+    merged = merge_analysis(cases["ANA-01"], "default", _outcome("blocked", "missing_fact:analysis"),
+                            _outcome("blocked", "ai_unavailable"))
+    assert (merged.status, merged.reason) == ("blocked", "ai_unavailable")

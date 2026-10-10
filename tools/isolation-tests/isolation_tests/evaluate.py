@@ -250,7 +250,9 @@ def merge_analysis(case: CaseSpec, variant: str, base: Outcome, analysis: Outcom
         return Outcome(base.case_id, base.variant, "failed" if base.status == "failed" else "blocked",
                        "analysis_missing" if base.status != "failed" else base.reason,
                        {**base.details, "base_status": base.status})
-    worst = min((base, analysis), key=lambda item: _PRIORITY.index(item.status))
+    # On an equal status the analysis reason wins: it names the cause (ai_unavailable)
+    # of the missing analysis facts the base result reports.
+    worst = min((analysis, base), key=lambda item: _PRIORITY.index(item.status))
     return Outcome(base.case_id, base.variant, worst.status, worst.reason,
                    {**base.details, "analysis": dict(analysis.details), "base_status": base.status})
 

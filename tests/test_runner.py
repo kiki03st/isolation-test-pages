@@ -395,6 +395,46 @@ def test_paired_injection_case_records_paired_verdict_fact(cases, config, monkey
     assert outcome.status == "passed", outcome
 
 
+@pytest.mark.parametrize("blocked_side", ["both", "pair", "main"])
+def test_paired_case_with_unavailable_ai_is_blocked_not_failed(cases, config, monkeypatch, blocked_side):
+    from isolation_tests import runner
+
+    html = "<p>인증번호를 입력해 주세요</p>"
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"ana-07": lambda url: _page(url, html, title=None)}))
+    calls = []
+
+    async def analyze(case, variant, page, **_):
+        calls.append(variant)
+        main = len(calls) == 1
+        if blocked_side == "both" or (blocked_side == "pair") != main:
+            return Outcome(case.id, variant, "blocked", "ai_unavailable", {})
+        return Outcome(case.id, variant, "passed", "analysis_expectations_met",
+                       {"verdict": {"final_state": "x"}, "accepted_codes": ["c"], "facts": {"analysis": True}})
+
+    monkeypatch.setattr(runner, "ANALYZE", analyze)
+    outcome = _run(runner.run_case(cases["ANA-07"], "baseline", config, "run-ana7b"))
+    assert (outcome.status, outcome.reason) == ("blocked", "ai_unavailable"), outcome
+    assert "paired_verdict_equal" not in outcome.details["observed_facts"]
+
+
+def test_run_with_ai_absent_for_ana07_exits_2_not_1(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+
+    monkeypatch.setenv("TEST_ONLY_TOKEN", "synthetic-runner-token")
+    html = "<p>인증번호를 입력해 주세요</p>"
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"ana-07": lambda url: _page(url, html, title=None)}))
+
+    async def analyze(case, variant, page, **_):
+        return Outcome(case.id, variant, "blocked", "ai_unavailable", {})
+
+    monkeypatch.setattr(runner, "ANALYZE", analyze)
+    out = tmp_path / "results"
+    code = runner.main(["run", "--config", str(config_file), "--output", str(out), "--case", "ANA-07"])
+    items = [i for i in _report(out)["items"] if i["case_id"] == "ANA-07"]
+    assert [(i["status"], i["reason"]) for i in items] == [("blocked", "ai_unavailable")] * 2
+    assert code == 2
+
+
 def test_fabricated_evidence_case_uses_no_network(cases, config, monkeypatch):
     from isolation_tests import runner
 

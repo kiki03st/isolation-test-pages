@@ -246,11 +246,15 @@ async def analyze_locally(case: CaseSpec, variant: str, page: CollectedPage | No
     return Outcome(case.id, variant, "passed", "analysis_expectations_met", details)
 
 
-def paired_verdicts_equal(first: Outcome, second: Outcome) -> bool:
-    """ANA-07: the same required behavior must give the same verdict and signals."""
+def paired_verdicts_equal(first: Outcome, second: Outcome) -> bool | None:
+    """ANA-07: the same required behavior must give the same verdict and signals.
+
+    None when either side is blocked: an unavailable analysis proves nothing
+    about equality, so no fact is recorded and the case stays blocked.
+    """
     keys = ("verdict", "accepted_codes")
     if first.status == "blocked" or second.status == "blocked":
-        return False
+        return None
     return all(key in first.details and first.details.get(key) == second.details.get(key)
                for key in keys) and all(key in second.details for key in keys)
 
