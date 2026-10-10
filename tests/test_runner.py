@@ -1346,3 +1346,73 @@ def test_inconclusive_concurrency_results_record_no_limit_fact(cases, config, ev
     outcome = _lim06(cases, config, monkeypatch, CollectionError("runner_timeout"))
     facts = outcome.details["observed_facts"]
     assert facts["limit_exceeded_confirmed"] is False and "concurrency_limit_ok" not in facts
+
+
+# --- final review #3: REC-01 needs the stored, later, passing follow-up report ------
+
+FOLLOWUP = "run-20261010T120000-abcd1234"
+
+
+def _iso(offset_seconds):
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)).isoformat(
+        timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _followup_report(directory, *, run_id=FOLLOWUP, started=None, failing=None, digest=None,
+                     name=None):
+    from isolation_tests.evaluate import _canonical_variants
+    from isolation_tests.report import canonical_manifest_sha256, write_reports
+
+    items = []
+    for case_id, variants in _canonical_variants().items():
+        for variant in variants:
+            status = "failed" if (case_id, variant) == failing else "passed"
+            items.append(Outcome(case_id, variant, status, "observed_expectations_met"))
+    staging = directory.parent / f"staging-{run_id}-{len(list(directory.parent.iterdir()))}"
+    json_path, _ = write_reports(tuple(items), staging, {
+        "run_id": run_id, "started_at": started or _iso(5), "ended_at": _iso(60),
+        "manifest_sha256": digest or canonical_manifest_sha256(), "scope": "all"})
+    target = directory / (name or f"isolation-report-{FOLLOWUP}.json")
+    target.write_bytes(json_path.read_bytes())
+    return target
+
+
+def _rec01(cases, config, evidence_dir, **facts):
+    from isolation_tests import runner
+
+    _write_evidence(evidence_dir, "run-rec-f", "REC-01", "replacement", {
+        "replacement_kind": "new_instance", "replacement_ok": True, "digest_ok": True,
+        "credentials_rotated": True, "old_credentials_rejected": True, "recovery_ok": True,
+        "positive_control_ok": True, "followup_run_id": FOLLOWUP, **facts})
+    caps = replace(config, capabilities=ALL_CAPS | {"replacement_evidence"})
+    return _run(runner.run_case(cases["REC-01"], "replacement", caps, "run-rec-f"))
+
+
+def test_replacement_passes_with_a_stored_later_passing_followup(cases, config, evidence_dir):
+    _followup_report(evidence_dir)
+    outcome = _rec01(cases, config, evidence_dir)
+    assert outcome.status == "passed", outcome
+    assert outcome.details["followup"]["reason"] == "followup_verified"
+
+
+@pytest.mark.parametrize("variant_kwargs,reason", [
+    (None, "followup_report_missing"),
+    ({"started": "2020-01-01T00:00:00.000Z"}, "followup_not_later"),
+    ({"failing": ("INT-01", "wrong-token")}, "followup_retest_not_passed"),
+    ({"failing": ("HOST-02", "mounts")}, "followup_retest_not_passed"),
+    ({"run_id": "run-20261010T130000-ffff0000"}, "followup_run_mismatch"),
+    ({"digest": "0" * 64}, "followup_not_canonical"),
+])
+def test_replacement_without_a_valid_followup_is_blocked(cases, config, evidence_dir, variant_kwargs, reason):
+    if variant_kwargs is not None:
+        _followup_report(evidence_dir, **variant_kwargs)
+    outcome = _rec01(cases, config, evidence_dir)
+    assert (outcome.status, outcome.reason) == ("blocked", reason), outcome
+
+
+def test_unreadable_followup_report_is_blocked(cases, config, evidence_dir):
+    (evidence_dir / f"isolation-report-{FOLLOWUP}.json").write_text("{not json", encoding="utf-8")
+    outcome = _rec01(cases, config, evidence_dir)
+    assert (outcome.status, outcome.reason) == ("blocked", "followup_report_unreadable")

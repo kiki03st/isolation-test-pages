@@ -75,6 +75,9 @@ EXPECTED_ERRORS = {
 # Collector answers that mean "over the active limit": HTTP 5xx from the API or a remote code.
 OVERLOAD_CODES = frozenset({"collector_unavailable", "collector_busy", "concurrency_limit_exceeded",
                             "queue_full"})
+# REC-01: the cases a follow-up run must pass again after a real replacement
+# (normal collection, authentication with the rotated token, host hardening).
+REPLACEMENT_RETESTS = ("COL-01", "INT-01", "HOST-01", "HOST-02", "HOST-03")
 ANALYSIS_CASES = frozenset({f"ANA-0{n}" for n in range(1, 8)})
 PAIRED = {"ANA-07": {"baseline": "injection", "injection": "baseline"}}
 _BLOCKING_CODES = PREPARATION_CODES | {"stub_not_collected"}
@@ -582,6 +585,47 @@ def _receiver_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evide
     return {"receiver_observed": observed}, None
 
 
+def _followup_check(admin: Evidence, obs: Observation, config: RuntimeConfig) -> Outcome:
+    """REC-01: the follow-up run named by ``followup_run_id`` really ran later and passed.
+
+    Its stored report must be in evidence_dir as ``isolation-report-<id>.json``
+    (the name ``run`` writes), carry that run_id and the canonical manifest hash,
+    start after the replacement record's window start and after this run, and
+    show every variant of REPLACEMENT_RETESTS passed. Otherwise blocked.
+    """
+    from .report import load_report, manifest_canonical
+
+    def result(status: str, reason: str) -> Outcome:
+        return Outcome("REC-01", "replacement", status, reason, {})
+
+    followup = admin.facts.get("followup_run_id")
+    if not isinstance(followup, str) or config.evidence_dir is None:
+        return result("blocked", "followup_run_missing")
+    path = config.evidence_dir / f"isolation-report-{followup}.json"
+    try:
+        items, metadata = load_report(path)
+    except FileNotFoundError:
+        return result("blocked", "followup_report_missing")
+    except (OSError, ValueError):
+        return result("blocked", "followup_report_unreadable")
+    if metadata.get("run_id") != followup:
+        return result("blocked", "followup_run_mismatch")
+    if not manifest_canonical(metadata):
+        return result("blocked", "followup_not_canonical")
+    try:
+        started = parse_utc(metadata.get("started_at"))
+        later = started >= parse_utc(admin.started_at) and started > parse_utc(obs.started_at)
+    except EvidenceUnavailable:
+        later = False
+    if not later:
+        return result("blocked", "followup_not_later")
+    status = {(item.case_id, item.variant): item.status for item in items}
+    for case_id in REPLACEMENT_RETESTS:
+        if any(status.get((case_id, variant)) != "passed" for variant in _canonical()[case_id].variants):
+            return result("blocked", "followup_retest_not_passed")
+    return result("passed", "followup_verified")
+
+
 def _merge(*sources: dict | None):
     merged: dict = {}
     for source in sources:
@@ -643,6 +687,8 @@ def judge(case: CaseSpec, variant: str, obs: Observation, config: RuntimeConfig)
     outcome = evaluate(case, variant, obs.page, evidence, config.capabilities)
     if case.id in HOST_CASES and (admin is not None or probe is not None):
         outcome = combine(outcome, validate_host_evidence(case.id, evidence), "host_evidence")
+    if case.id == "REC-01" and admin is not None:
+        outcome = combine(outcome, _followup_check(admin, obs, config), "followup")
     outcome = merge_analysis(case, variant, outcome, obs.analysis)
     pair_blocked = obs.notes.get("pair_analysis_blocked")
     if isinstance(pair_blocked, str) and outcome.status != "failed":
