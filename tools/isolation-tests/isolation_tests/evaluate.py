@@ -181,6 +181,10 @@ def evaluate(case: CaseSpec, variant: str, page: CollectedPage | None, evidence:
     contract = _contract(case, variant)
     if contract is None:
         return outcome("blocked", "missing_expectations", **regions)
+    if case.recovery_case is not None and facts.get("recovery_ok") is False:
+        # The next normal request after a limit trial failed: an observed
+        # contradiction that no missing precondition can turn into "unproven".
+        return outcome("failed", "recovery_failed", failures=["fact_mismatch:recovery_ok"], **regions)
     needed = set(case.required_capabilities) | set(contract.get("required_capabilities", ()))
     missing_caps = sorted(needed - set(capabilities))
     if missing_caps:
@@ -249,6 +253,36 @@ def merge_analysis(case: CaseSpec, variant: str, base: Outcome, analysis: Outcom
     worst = min((base, analysis), key=lambda item: _PRIORITY.index(item.status))
     return Outcome(base.case_id, base.variant, worst.status, worst.reason,
                    {**base.details, "analysis": dict(analysis.details), "base_status": base.status})
+
+
+def combine(base: Outcome, other: Outcome | None, label: str) -> Outcome:
+    """Worse status wins (failed > blocked > not_run > passed); ``other`` is kept under ``label``."""
+    if other is None:
+        return base
+    worst = min((base, other), key=lambda item: _PRIORITY.index(item.status))
+    details = {**base.details, label: {"status": other.status, "reason": other.reason,
+                                       **dict(other.details)}}
+    return Outcome(base.case_id, base.variant, worst.status, worst.reason, details)
+
+
+def merge_recovery(base: Outcome, recovery: Outcome | None) -> Outcome:
+    """Combine a limit trial with the follow-up normal request (its ``recovery_case``).
+
+    A limit is never met unless the next normal request passed: a failed follow-up
+    is ``failed`` and a missing or unproven one is ``blocked``.
+    """
+    if recovery is None:
+        if base.status == "failed":
+            return base
+        return Outcome(base.case_id, base.variant, "blocked", "recovery_not_run",
+                       {**base.details, "base_status": base.status})
+    details = {**base.details, "recovery": {"status": recovery.status, "reason": recovery.reason,
+                                            **dict(recovery.details)}}
+    if base.status == "failed" or recovery.status == "passed":
+        return Outcome(base.case_id, base.variant, base.status, base.reason, details)
+    if recovery.status == "failed":
+        return Outcome(base.case_id, base.variant, "failed", "recovery_failed", details)
+    return Outcome(base.case_id, base.variant, "blocked", "recovery_blocked", details)
 
 
 @lru_cache(maxsize=1)
