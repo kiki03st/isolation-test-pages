@@ -133,7 +133,29 @@ def _run(command: list[str], cwd: Path | None = None) -> str:
 def _gh_user() -> dict:
     """Read-only identity lookup of the authenticated account."""
     data = json.loads(_run(["gh", "api", "user"]))
+    if not isinstance(data, dict):
+        raise ValueError("account lookup returned an unexpected shape")
     return {"login": data.get("login"), "type": data.get("type")}
+
+
+def _gh_repo(owner: str, repo: str) -> dict:
+    """Read-only repository lookup. A missing repository raises (refused)."""
+    data = json.loads(_run(["gh", "api", f"repos/{owner}/{repo}"]))
+    if not isinstance(data, dict):
+        raise ValueError("repository lookup returned an unexpected shape")
+    return data
+
+
+def assert_repository_personal_public(data: object, owner: str) -> None:
+    """Owner must be the personal User, not a fork, and public (brief: --public)."""
+    holder = data.get("owner") if isinstance(data, dict) else None
+    if (not isinstance(holder, dict) or holder.get("type") != "User"
+            or str(holder.get("login", "")).lower() != owner.lower()):
+        raise ValueError("repository owner is not the personal user")
+    if data.get("fork") is not False:
+        raise ValueError("repository is a fork or fork status unknown")
+    if data.get("private") is not False or data.get("visibility", "public") != "public":
+        raise ValueError("repository is not public")
 
 
 def _git_origin(root: Path) -> str | None:
@@ -141,6 +163,15 @@ def _git_origin(root: Path) -> str | None:
         return _run(["git", "remote", "get-url", "origin"], cwd=root).strip() or None
     except RuntimeError:
         return None
+
+
+def _git_push_urls(root: Path) -> list[str] | None:
+    """Every URL a push would use (pushurl, several push URLs, pushInsteadOf applied)."""
+    try:
+        out = _run(["git", "remote", "get-url", "--push", "--all", "origin"], cwd=root)
+    except RuntimeError:
+        return None
+    return [line.strip() for line in out.splitlines() if line.strip()]
 
 
 def _git_history_emails(root: Path) -> list[str]:
@@ -158,6 +189,16 @@ def assert_remote_matches(origin: str | None, owner: str, repo: str) -> None:
                 return
             break
     raise ValueError("remote mismatch")
+
+
+def assert_push_urls_match(urls: list[str] | None, owner: str, repo: str) -> None:
+    if not urls:
+        raise ValueError("push destination mismatch")
+    for url in urls:
+        try:
+            assert_remote_matches(url, owner, repo)
+        except ValueError:
+            raise ValueError("push destination mismatch") from None
 
 
 def assert_history_noreply(emails: list[str]) -> int:
@@ -197,8 +238,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _check_account(args.owner)
             print("account: ok (authenticated User matches owner)")
+            assert_repository_personal_public(_gh_repo(args.owner, args.repo), args.owner)
+            print("repository: ok (personal User, public, not a fork)")
             assert_remote_matches(_git_origin(args.repo_root), args.owner, args.repo)
-            print("remote: ok (origin matches owner/repo)")
+            assert_push_urls_match(_git_push_urls(args.repo_root), args.owner, args.repo)
+            print("remote: ok (fetch and every push URL match owner/repo)")
             count = assert_history_noreply(_git_history_emails(args.repo_root))
             print(f"history: ok ({count} values checked)")
     except (ValueError, RuntimeError, OSError, json.JSONDecodeError, subprocess.SubprocessError) as error:

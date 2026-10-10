@@ -27,7 +27,7 @@ def test_personal_owner_guard_rejects_non_personal_target(login, owner, account_
 
 # --- repository / history guard (gh and git are replaced by fakes; no network) ---
 
-NOREPLY = "102171184+personal-user@users.noreply.github.com"
+NOREPLY = "900000001+personal-user@users.noreply.github.com"
 
 
 @pytest.fixture
@@ -37,8 +37,19 @@ def fake_env(monkeypatch):
     state = {
         "user": {"login": "personal-user", "type": "User"},
         "origin": "https://github.com/personal-user/isolation-test-pages.git",
+        "push": ["https://github.com/personal-user/isolation-test-pages.git"],
+        "repo": {"owner": {"login": "personal-user", "type": "User"}, "fork": False,
+                 "private": False, "visibility": "public"},
         "emails": [NOREPLY, NOREPLY, "noreply@github.com"],
     }
+    monkeypatch.setattr(guard, "_git_push_urls", lambda root: state["push"])
+
+    def repo_lookup(owner, repo):
+        if state["repo"] is None:
+            raise RuntimeError("missing")
+        return state["repo"]
+
+    monkeypatch.setattr(guard, "_gh_repo", repo_lookup)
     monkeypatch.setattr(guard, "_gh_user", lambda: state["user"])
     monkeypatch.setattr(guard, "_git_origin", lambda root: state["origin"])
     monkeypatch.setattr(guard, "_git_history_emails", lambda root: state["emails"])
@@ -138,4 +149,70 @@ def test_gh_failure_is_a_refusal_not_a_traceback(fake_env, monkeypatch, capsys):
 
     monkeypatch.setattr(guard, "_gh_user", fail)
     assert _repo() == 1
+    assert "refused" in capsys.readouterr().out
+
+
+# --- push destinations (pushurl, several push URLs, pushInsteadOf) ---
+
+GOOD = "https://github.com/personal-user/isolation-test-pages.git"
+
+
+@pytest.mark.parametrize("push", [
+    ["https://github.com/an-org/isolation-test-pages.git"],
+    [GOOD, "https://github.com/an-org/isolation-test-pages.git"],
+    ["https://github.com/an-org/isolation-test-pages.git", GOOD],
+    [GOOD, GOOD, "https://example.org/personal-user/isolation-test-pages"],
+    [],
+    None,
+])
+def test_every_push_url_must_match(fake_env, push, capsys):
+    fake_env["push"] = push
+    assert _repo() == 1
+    assert "an-org" not in capsys.readouterr().out
+
+
+def test_multiple_matching_push_urls_are_accepted(fake_env):
+    fake_env["push"] = [GOOD, "git@github.com:personal-user/isolation-test-pages.git"]
+    assert _repo() == 0
+
+
+def test_push_urls_come_from_get_url_push_all(monkeypatch, tmp_path):
+    from isolation_tests import publish_guard as guard
+
+    calls = []
+
+    def fake_run(command, cwd=None):
+        calls.append(command)
+        return GOOD + "\n" + "https://github.com/an-org/isolation-test-pages\n"
+
+    monkeypatch.setattr(guard, "_run", fake_run)
+    urls = guard._git_push_urls(tmp_path)
+    assert calls == [["git", "remote", "get-url", "--push", "--all", "origin"]]
+    assert urls == [GOOD, "https://github.com/an-org/isolation-test-pages"]
+
+
+# --- repository type lookup ---
+
+@pytest.mark.parametrize("repo", [
+    None,
+    {"owner": {"login": "personal-user", "type": "Organization"}, "fork": False, "private": False},
+    {"owner": {"login": "other-user", "type": "User"}, "fork": False, "private": False},
+    {"owner": {"login": "personal-user", "type": "User"}, "fork": True, "private": False},
+    {"owner": {"login": "personal-user", "type": "User"}, "fork": False, "private": True},
+    {"owner": {"login": "personal-user", "type": "User"}, "fork": False},
+    {"owner": "personal-user", "fork": False, "private": False},
+    [],
+])
+def test_repository_lookup_must_be_a_public_non_fork_personal_repo(fake_env, repo, capsys):
+    fake_env["repo"] = repo
+    assert _repo() == 1
+    out = capsys.readouterr().out
+    assert "refused" in out and "personal-user" not in out
+
+
+def test_non_object_user_json_is_a_refusal(monkeypatch, capsys):
+    from isolation_tests import publish_guard as guard
+
+    monkeypatch.setattr(guard, "_run", lambda command, cwd=None: "[1, 2]")
+    assert guard.main(["repository", "--owner", "x", "--repo", "y"]) == 1
     assert "refused" in capsys.readouterr().out

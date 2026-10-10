@@ -111,19 +111,47 @@ isolation-tests report --input results/isolation-report-<run_id>.json --output r
   변형이 `passed`일 때뿐입니다.
 - 리포트는 `results/`에만 저장됩니다. 게시하지 않습니다.
 
-## 7. 공개 전 점검 (게시 담당자가 수행)
+## 7. 공개 전 점검과 게시 순서 (게시 담당자가 수행)
 
-```
-isolation-build-pages --manifest tools/isolation-tests/cases.json --output test-pages --commit <sha>
-python -m isolation_tests.publish_guard artifact test-pages
-python -m isolation_tests.publish_guard history
-python -m isolation_tests.publish_guard repository --owner <login> --repo isolation-test-pages
-```
+`<login>`은 승인된 개인 GitHub 로그인, `<noreply-email>`은 그 계정의 GitHub noreply 주소입니다.
+실제 값은 이 문서에 쓰지 않습니다.
 
-- 모든 점검이 통과한 뒤에만 원격 저장소를 만들고 push합니다. 게시 주소는 실제 게시가 끝난 뒤
-  README에 적습니다.
-- 저장소 소유자는 개인 User 계정이어야 합니다(조직 불가). 원격이 이미 있으면 읽기 전용으로
-  소유자·공개 여부·Pages 상태를 확인하고, 기존 내용을 교체하거나 force-push하지 않습니다.
-- Pages 워크플로는 저장소 변수 `PERSONAL_OWNER`가 저장소 소유자와 같을 때만 build를 실행합니다.
-- 커밋은 GitHub noreply 이메일로만 만듭니다. history 가드가 모든 작성자·커밋자 값을 확인하되
-  값 자체는 출력하지 않습니다.
+1. 첫 커밋 전에 noreply 이메일을 설정합니다. 이어서 이력·산출물 가드를 실행합니다.
+
+   ```
+   git config user.email "<noreply-email>"
+   isolation-build-pages --manifest tools/isolation-tests/cases.json --output test-pages --commit <sha>
+   python -m isolation_tests.publish_guard history
+   python -m isolation_tests.publish_guard artifact test-pages
+   ```
+
+2. 원격 저장소를 만듭니다. 자동 push 옵션(`--push`)은 붙이지 않습니다.
+
+   ```
+   gh repo create <login>/isolation-test-pages --public --source . --remote origin
+   ```
+
+3. 공개 owner 변수를 설정합니다. 값이 없거나 소유자가 다르면 build가 실행되지 않습니다.
+
+   ```
+   gh variable set PERSONAL_OWNER --body <login> --repo <login>/isolation-test-pages
+   ```
+
+4. 저장소 가드를 실행합니다. 인증된 계정이 User인지, 저장소 owner가 User이고 fork가
+   아니며 공개인지, origin의 fetch URL과 모든 push URL(pushurl, 여러 push URL,
+   pushInsteadOf 적용 후)이 owner/repo와 일치하는지, 전체 이력이 noreply인지 확인합니다.
+
+   ```
+   python -m isolation_tests.publish_guard repository --owner <login> --repo isolation-test-pages
+   ```
+
+5. 4단계를 통과한 뒤에만 push합니다. force-push는 하지 않습니다.
+
+저장소 이름이 다르면 모든 명령, 가드 인자, 원격을 그 이름으로 함께 바꿉니다.
+
+저장소가 이미 있으면 읽기 전용으로 owner, 공개 여부, Pages 상태만 확인합니다. 기존 내용을
+교체하거나 덮어쓰지 않습니다. 가드가 거부하면 중단합니다.
+
+- 저장소 소유자는 개인 User 계정이어야 합니다(조직 불가). 조직 저장소 원격을 재사용하지 않습니다.
+- 게시 주소는 실제 게시가 끝난 뒤에 README에 적습니다.
+- 가드는 값 자체를 출력하지 않고 통과/거부 상태만 출력합니다.
