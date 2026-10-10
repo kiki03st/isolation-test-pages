@@ -13,6 +13,7 @@ strictly typed values, so a pasted secret cannot be carried into a result.
 import errno
 import os
 import re
+import stat
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -25,6 +26,7 @@ from .evidence import APPROVED_FACTS, EvidenceUnavailable, validate_facts
 WRITE_PROBE_PATH = Path("/home/collector/isolation-test-write-probe")
 PROC_STATUS = Path("/proc/self/status")
 PROC_MOUNTS = Path("/proc/self/mounts")
+PROC_MOUNTINFO = Path("/proc/self/mountinfo")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 CANONICAL_MANIFEST = Path(__file__).resolve().parents[1] / "cases.json"
 
@@ -64,20 +66,121 @@ def _detect_boundary() -> str:
     return "container" if any(p.exists() for p in markers) else "host"
 
 
-def _mount_facts(text: str) -> bool | None:
-    """True when the root filesystem is read-only and no runtime socket is mounted."""
-    root_options = None
+# Runtime directories whose presence in the container exposes the engine.
+_RUNTIME_MOUNTS = frozenset({
+    "/var/run", "/run/docker", "/run/containerd", "/run/podman", "/run/crio",
+    "/var/run/docker", "/var/run/containerd", "/var/lib/docker", "/var/lib/containerd",
+    "/var/lib/kubelet", "/host", "/rootfs",
+})
+_RUNTIME_SOURCES = frozenset({"/run", "/var/run", "/run/docker", "/run/containerd", "/var/run/docker",
+                              "/var/run/containerd", "/var/lib/docker", "/var/lib/containerd"})
+# Directories always searched for a socket, mounted separately or not.
+_SOCKET_DIRS = ("/run", "/var/run")
+# Kernel pseudo filesystems hold no runtime sockets and are not walked.
+_PSEUDO_FS = frozenset({
+    "proc", "sysfs", "cgroup", "cgroup2", "devpts", "mqueue", "securityfs", "debugfs", "tracefs",
+    "pstore", "bpf", "configfs", "fusectl", "hugetlbfs", "binfmt_misc", "autofs", "nsfs",
+})
+MAX_SCAN_DEPTH = 6
+MAX_SCAN_ENTRIES = 20000
+
+
+def _unescape(field: str) -> str:
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def _mountinfo(text: str) -> list[dict]:
+    """Parse /proc/self/mountinfo: root (bind source), mount point, options, fstype, source."""
+    mounts = []
     for line in text.splitlines():
-        parts = line.split()
-        if len(parts) < 4:
+        left, separator, right = line.partition(" - ")
+        pre, post = left.split(), right.split()
+        if not separator or len(pre) < 6 or not post:
             continue
-        if parts[1] == "/":
-            root_options = parts[3].split(",")
-        if parts[1].endswith(("docker.sock", "containerd.sock")):
+        mounts.append({"root": _unescape(pre[3]), "point": _unescape(pre[4]),
+                       "options": pre[5].split(","), "fstype": post[0],
+                       "source": post[1] if len(post) > 1 else ""})
+    return mounts
+
+
+def _socket_under(path: str) -> bool | None:
+    """True if a Unix socket is reachable at or under ``path`` (links not followed).
+
+    False when none exists (or the path is absent); None when the search could not
+    be completed (unreadable directory, depth or entry budget exceeded).
+    """
+    budget = [MAX_SCAN_ENTRIES]
+
+    def walk(current: str, depth: int) -> bool | None:
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
             return False
-    if root_options is None:
+        except OSError:
+            return None
+        if stat.S_ISSOCK(info.st_mode):
+            return True
+        if not stat.S_ISDIR(info.st_mode):
+            return False
+        if depth >= MAX_SCAN_DEPTH:
+            return None
+        try:
+            names = sorted(os.listdir(current))
+        except OSError:
+            return None
+        complete = True
+        for name in names:
+            budget[0] -= 1
+            if budget[0] < 0:
+                return None
+            found = walk(os.path.join(current, name), depth + 1)
+            if found:
+                return True
+            complete = complete and found is not None
+        return False if complete else None
+
+    return walk(path, 0)
+
+
+def _mount_facts(text: str) -> bool | None:
+    """True when the root is read-only and no runtime socket or directory is reachable.
+
+    ``text`` is /proc/self/mountinfo. False on any mounted socket, runtime-engine
+    directory (bind-mounted /var/run, /run/docker, /var/lib/docker ...), host root
+    filesystem, or a socket found under any mounted directory or /run. None when
+    the root is unknown or a socket search could not be completed.
+    """
+    mounts = _mountinfo(text)
+    root = next((m for m in mounts if m["point"] == "/"), None)
+    if root is None:
         return None
-    return "ro" in root_options
+    complete = True
+    for mount in mounts:
+        point, source = mount["point"], mount["root"]
+        if point == "/":
+            continue
+        if point.endswith(".sock") or source.endswith(".sock"):
+            return False
+        if point in _RUNTIME_MOUNTS or source in _RUNTIME_SOURCES:
+            return False
+        if point == "/run" and (source != "/" or mount["fstype"] != "tmpfs"):
+            return False  # the host's /run (or part of it), not a fresh tmpfs
+        if source == "/" and mount["source"].startswith("/dev/") and mount["fstype"] not in {"tmpfs"}:
+            return False  # a block device's whole filesystem: the host root
+        if mount["fstype"] in _PSEUDO_FS:
+            continue
+        found = _socket_under(point)
+        if found:
+            return False
+        complete = complete and found is not None
+    for directory in _SOCKET_DIRS:
+        found = _socket_under(directory)
+        if found:
+            return False
+        complete = complete and found is not None
+    if "ro" not in root["options"]:
+        return False
+    return True if complete else None
 
 
 def _write_probe() -> bool | None:
@@ -187,9 +290,9 @@ def collect_host_facts(*, boundary: str | None = None) -> dict:
             facts["seccomp_ok"] = fields["Seccomp"] == "2"
         if "NoNewPrivs" in fields:
             facts["no_new_privileges_ok"] = fields["NoNewPrivs"] == "1"
-    mounts = _read_text(PROC_MOUNTS)
-    if mounts is not None:
-        mounts_ok = _mount_facts(mounts)
+    mountinfo = _read_text(PROC_MOUNTINFO)
+    if mountinfo is not None:
+        mounts_ok = _mount_facts(mountinfo)
         if mounts_ok is not None:
             facts["mounts_ok"] = mounts_ok
     # The write probe belongs to the container boundary; a host is never written.

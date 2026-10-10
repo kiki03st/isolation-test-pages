@@ -46,12 +46,27 @@ STATUS_OK = "Name:\tx\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nNoN
 MOUNTS_OK = "overlay / overlay ro,relatime 0 0\ntmpfs /tmp tmpfs rw 0 0\n"
 
 
-def linux(monkeypatch, status=STATUS_OK, mounts=MOUNTS_OK, uid=1000, write=True):
+def as_mountinfo(mounts):
+    """/proc/self/mounts lines as /proc/self/mountinfo lines (fresh mounts, root "/")."""
+    if mounts is None:
+        return None
+    lines = []
+    for number, line in enumerate(mounts.splitlines(), start=20):
+        device, point, fstype, options = line.split()[:4]
+        lines.append(f"{number} 1 0:{number} / {point} {options} - {fstype} {device} {options}")
+    return "\n".join(lines) + "\n"
+
+
+def linux(monkeypatch, status=STATUS_OK, mounts=MOUNTS_OK, uid=1000, write=True, mountinfo=None,
+          sockets=()):
     from isolation_tests import host_probes
     monkeypatch.setattr(host_probes, "_platform", lambda: "linux")
     monkeypatch.setattr(host_probes, "_detect_boundary", lambda: "container")
+    info = mountinfo if mountinfo is not None else as_mountinfo(mounts)
     monkeypatch.setattr(host_probes, "_read_text", lambda p: {
-        host_probes.PROC_STATUS: status, host_probes.PROC_MOUNTS: mounts}.get(p))
+        host_probes.PROC_STATUS: status, host_probes.PROC_MOUNTS: mounts,
+        host_probes.PROC_MOUNTINFO: info}.get(p))
+    monkeypatch.setattr(host_probes, "_socket_under", lambda path: path in sockets)
     monkeypatch.setattr(os, "getuid", lambda: uid, raising=False)
     monkeypatch.setattr(host_probes, "_write_probe", lambda: write)
     return host_probes.collect_host_facts()
@@ -353,3 +368,100 @@ def test_single_fact_vocabulary_lives_in_evidence_module():
                  "boundary", "evidence_source", "replacement_kind", "concurrency_limit",
                  "fixture_max_active", "cpu_limit", "memory_limit_mib", "resource_limits_ok"):
         assert name in evidence.APPROVED_FACTS, name
+
+
+# --- final review #8: runtime-socket directories mounted into the container -------
+# Samples follow /proc/self/mountinfo as written by Docker 24 / runc on Linux 6.x.
+
+HARDENED_MOUNTINFO = (
+    "590 512 0:61 / / ro,relatime master:301 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/A:/var/lib/docker/overlay2/l/B,upperdir=/var/lib/docker/overlay2/x/diff,workdir=/var/lib/docker/overlay2/x/work\n"
+    "591 590 0:64 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n"
+    "592 590 0:65 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755,inode64\n"
+    "593 592 0:66 / /dev/pts rw,nosuid,noexec,relatime - devpts devpts rw,gid=5,mode=620,ptmxmode=666\n"
+    "594 590 0:67 / /sys ro,nosuid,nodev,noexec,relatime - sysfs sysfs ro\n"
+    "595 594 0:30 / /sys/fs/cgroup ro,nosuid,nodev,noexec,relatime - cgroup2 cgroup rw,nsdelegate\n"
+    "596 592 0:63 / /dev/mqueue rw,nosuid,nodev,noexec,relatime - mqueue mqueue rw\n"
+    "597 592 0:68 / /dev/shm rw,nosuid,nodev,noexec,relatime - tmpfs shm rw,size=262144k,inode64\n"
+    "598 590 259:2 /var/lib/docker/containers/c0ffee/resolv.conf /etc/resolv.conf rw,relatime - ext4 /dev/nvme0n1p2 rw\n"
+    "599 590 259:2 /var/lib/docker/containers/c0ffee/hostname /etc/hostname rw,relatime - ext4 /dev/nvme0n1p2 rw\n"
+    "600 590 259:2 /var/lib/docker/containers/c0ffee/hosts /etc/hosts rw,relatime - ext4 /dev/nvme0n1p2 rw\n"
+    "601 590 0:69 / /tmp rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=262144k,inode64\n"
+)
+
+
+def test_hardened_container_mountinfo_passes_mounts(monkeypatch):
+    assert linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO)["mounts_ok"] is True
+
+
+@pytest.mark.parametrize("extra", [
+    # docker run -v /var/run:/var/run (host /var/run -> /run, a tmpfs)
+    "610 590 0:25 / /var/run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=1631836k,mode=755,inode64\n",
+    # docker run -v /run:/run with the host's /run tmpfs bound under a sub path
+    "611 590 0:25 /docker /run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=1631836k,mode=755,inode64\n",
+    # the runtime directories themselves
+    "612 590 0:25 /docker /run/docker rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=755\n",
+    "613 590 0:25 /containerd /run/containerd rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=755\n",
+    "614 590 259:2 /var/lib/docker /var/lib/docker rw,relatime - ext4 /dev/nvme0n1p2 rw\n",
+    # the host root filesystem
+    "615 590 259:2 / /host ro,relatime - ext4 /dev/nvme0n1p2 rw\n",
+    "616 590 259:2 / /mnt/root ro,relatime - ext4 /dev/nvme0n1p2 rw\n",
+    # a socket bound to another name
+    "617 590 0:25 /docker.sock /run/engine rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=755\n",
+    "618 590 0:25 /podman/podman.sock /var/run/podman.sock rw,nosuid,nodev - tmpfs tmpfs rw\n",
+])
+def test_bind_mounted_runtime_directories_fail_mounts(monkeypatch, extra):
+    assert linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO + extra)["mounts_ok"] is False
+
+
+@pytest.mark.parametrize("extra,socket_dir", [
+    ("620 590 0:25 / /run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=65536k\n", "/run"),
+    ("621 590 0:25 /user/1000 /srv/state rw,nosuid,nodev,relatime - tmpfs tmpfs rw\n", "/srv/state"),
+    ("", "/tmp"),
+    ("", "/run"),
+])
+def test_socket_reachable_under_any_mounted_directory_fails_mounts(monkeypatch, extra, socket_dir):
+    facts = linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO + extra, sockets=(socket_dir,))
+    assert facts["mounts_ok"] is False
+
+
+def test_fresh_run_tmpfs_without_sockets_passes(monkeypatch):
+    extra = "620 590 0:70 / /run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=65536k,inode64\n"
+    assert linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO + extra)["mounts_ok"] is True
+
+
+def test_incomplete_socket_scan_omits_mounts(monkeypatch):
+    from isolation_tests import host_probes
+    facts = linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO)
+    monkeypatch.setattr(host_probes, "_socket_under", lambda path: None if path == "/tmp" else False)
+    facts = host_probes.collect_host_facts()
+    assert "mounts_ok" not in facts
+
+
+def test_writable_root_in_mountinfo_fails_mounts(monkeypatch):
+    info = HARDENED_MOUNTINFO.replace("/ / ro,relatime", "/ / rw,relatime", 1)
+    assert linux(monkeypatch, mountinfo=info)["mounts_ok"] is False
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo") or os.name == "nt", reason="needs POSIX sockets")
+def test_socket_scan_finds_a_unix_socket_and_ignores_plain_files(tmp_path):
+    import socket
+    from isolation_tests import host_probes
+    (tmp_path / "plain").write_text("x")
+    assert host_probes._socket_under(str(tmp_path)) is False
+    nested = tmp_path / "containerd"
+    nested.mkdir()
+    server = socket.socket(socket.AF_UNIX)
+    try:
+        server.bind(str(nested / "containerd.sock"))
+        assert host_probes._socket_under(str(tmp_path)) is True
+    finally:
+        server.close()
+
+
+def test_socket_scan_of_missing_path_is_false_and_budget_overflow_is_incomplete(tmp_path, monkeypatch):
+    from isolation_tests import host_probes
+    assert host_probes._socket_under(str(tmp_path / "absent")) is False
+    for index in range(5):
+        (tmp_path / f"f{index}").write_text("x")
+    monkeypatch.setattr(host_probes, "MAX_SCAN_ENTRIES", 3)
+    assert host_probes._socket_under(str(tmp_path)) is None
