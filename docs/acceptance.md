@@ -20,8 +20,8 @@
 ## 도구 검증 (tool_ready)
 
 1. 단위·로컬 서버 시험: `-m "not browser and not timing and not live"` 결과
-   1284 passed, 11 skipped, 0 failed. skip 11건은 모두 이 Windows 계정의 심볼릭 링크 권한 부족이며
-   통과로 세지 않는다.
+   1391 passed, 12 skipped, 0 failed. skip 12건 중 11건은 이 Windows 계정의 심볼릭 링크 권한 부족,
+   1건은 Unix 소켓이 필요한 마운트 소켓 탐색 시험이며 통과로 세지 않는다.
 2. 브라우저 시험: `-m browser` 37 passed (Chromium 로컬).
 3. 실시간 시험: `--run-timing`으로 별도 실행해 2 passed. 옵션 없이 실행하면 2 skipped.
 4. live 표식 시험은 아직 없다(0 선택). 실제 환경 시험은 실행기의 live 실행으로만 수행한다.
@@ -44,7 +44,7 @@
 | ANA-03 (비밀번호, 인증번호) | failed | 제품이 일반 비밀번호·OTP 입력을 credential_request로 거절해 판정이 inconclusive. 명세는 의심 판정 |
 | ANA-04 | failed | 샘플 앱 파일 링크가 앱 링크로 분류되지 않아 설치 유도 신호가 없음 |
 | ANA-07 (기준, 주입) | failed | ANA-03과 같은 원인. 두 판정 자체는 서로 같다 |
-| LIM-04 result 경계 | failed | 표본의 직렬화 크기 보정과 제품 예산이 약 20바이트 어긋남. 제품 불일치로 보고 |
+| LIM-04 result 경계 | failed | 표본의 직렬화 크기 보정과 제품 예산이 수십 바이트 이내 (측정값 약 13~20바이트) 어긋남. 제품 불일치로 보고 |
 
 LIM-04의 bytes, elements, text, depth 경계는 passed다. 위 항목은 도구 결함이 아니라 제품과 명세의 차이다.
 
@@ -62,5 +62,6 @@ LIM-04의 bytes, elements, text, depth 경계는 passed다. 위 항목은 도구
 
 ## 남은 순서
 
-1. 게시 승인 후 원격 생성, 변수 설정, push, Pages 활성화, 배포 URL 확인 (pages_published)
+1. 게시 승인 후 runbook 7절 순서: noreply·이력·산출물 가드, 원격 생성(push 없음), Pages 활성화(첫 push 전),
+   PERSONAL_OWNER 변수 설정, 저장소 가드, push, 배포 URL 확인 (pages_published)
 2. 위 입력을 갖춘 뒤 그룹별 실행과 최종 `run --all` (environment_verified)
