@@ -1286,3 +1286,63 @@ def test_evidence_only_admin_window_must_not_start_before_the_run(cases, config,
     outcome = _run(runner.run_case(cases["INT-02"], "allowed-source", replace(config, capabilities=caps),
                                    "run-early"))
     assert (outcome.status, outcome.reason) == ("blocked", "evidence_window_mismatch")
+
+
+# --- final review #4: LIM-06 is judged on the runner's own limit+1 results ---------
+
+def _lim06(cases, config, monkeypatch, answer, limit=3):
+    from isolation_tests import runner
+
+    def collect(url):
+        return answer(url) if callable(answer) else answer
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"LIM-02": collect}))
+    limited = replace(config, limits={**config.limits, "collector_concurrency": limit})
+    return _run(runner.run_case(cases["LIM-06"], "concurrency", limited, "run-lim6-x"))
+
+
+def _lim06_admin(evidence_dir, **facts):
+    _write_evidence(evidence_dir, "run-lim6-x", "LIM-06", "concurrency", {
+        "remote_job_terminated": True, "children_remaining": 0, "concurrency_limit_known": True,
+        "queue_limit_ok": True, "fixture_max_active": 4, **facts})
+
+
+def test_every_request_collected_contradicts_an_admin_limit_claim(cases, config, evidence_dir, monkeypatch):
+    _lim06_admin(evidence_dir, concurrency_limit_ok=True)
+    outcome = _lim06(cases, config, monkeypatch, lambda url: _page(url, "<p>s</p>", title=None))
+    assert outcome.details["observed_facts"]["concurrency_limit_ok"] is False
+    assert outcome.details["observed_facts"]["limit_exceeded_confirmed"] is False
+    assert (outcome.status, outcome.reason) == ("blocked", "evidence_conflict")
+
+
+def test_every_request_collected_without_admin_claim_fails(cases, config, evidence_dir, monkeypatch):
+    _lim06_admin(evidence_dir)
+    outcome = _lim06(cases, config, monkeypatch, lambda url: _page(url, "<p>s</p>", title=None))
+    assert outcome.status == "failed" and "fact_mismatch:concurrency_limit_ok" in outcome.details["failures"]
+
+
+def test_observed_overload_within_the_limit_confirms_enforcement(cases, config, evidence_dir, monkeypatch):
+    from isolation_tests.adapters.collector import CollectionError
+
+    seen = []
+
+    def answer(url):
+        seen.append(url)
+        if len(seen) == 1:
+            return CollectionError("collector_unavailable")
+        return _page(url, "<p>s</p>", title=None)
+
+    _lim06_admin(evidence_dir, concurrency_limit_ok=True)
+    outcome = _lim06(cases, config, monkeypatch, answer)
+    facts = outcome.details["observed_facts"]
+    assert (facts["limit_exceeded_confirmed"], facts["concurrency_limit_ok"]) == (True, True)
+    assert outcome.reason != "evidence_conflict"
+
+
+def test_inconclusive_concurrency_results_record_no_limit_fact(cases, config, evidence_dir, monkeypatch):
+    from isolation_tests.adapters.collector import CollectionError
+
+    _lim06_admin(evidence_dir, concurrency_limit_ok=True)
+    outcome = _lim06(cases, config, monkeypatch, CollectionError("runner_timeout"))
+    facts = outcome.details["observed_facts"]
+    assert facts["limit_exceeded_confirmed"] is False and "concurrency_limit_ok" not in facts

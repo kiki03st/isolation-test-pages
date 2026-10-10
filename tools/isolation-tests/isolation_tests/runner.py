@@ -72,6 +72,9 @@ EXPECTED_ERRORS = {
     ("INT-01", "wrong-token"): frozenset({"authentication_failed"}),
     ("INT-01", "untrusted-ca"): frozenset({"tls_verification_failed"}),
 }
+# Collector answers that mean "over the active limit": HTTP 5xx from the API or a remote code.
+OVERLOAD_CODES = frozenset({"collector_unavailable", "collector_busy", "concurrency_limit_exceeded",
+                            "queue_full"})
 ANALYSIS_CASES = frozenset({f"ANA-0{n}" for n in range(1, 8)})
 PAIRED = {"ANA-07": {"baseline": "injection", "injection": "baseline"}}
 _BLOCKING_CODES = PREPARATION_CODES | {"stub_not_collected"}
@@ -310,6 +313,27 @@ async def _int01(case, variant, config, obs, mode) -> None:
         obs.facts["page_opened"] = obs.page is not None
 
 
+def _limit_facts(results, limit: int) -> dict:
+    """What the limit+1 results themselves show about the collector's limit.
+
+    Every request collected proves the limit was not enforced (concurrency_limit_ok
+    False). An overload answer with at most limit collected confirms enforcement.
+    Anything else (timeouts, other errors) is inconclusive and records no limit claim,
+    so an administrator's claim cannot replace or contradict the runner's observation.
+    """
+    collected = sum(1 for page, _ in results if page is not None and not page.failures)
+    overloaded = sum(1 for page, code in results
+                     if (code if page is None else None) in OVERLOAD_CODES
+                     or (page is not None and set(page.failures) & OVERLOAD_CODES))
+    confirmed = overloaded >= 1 and collected <= limit
+    facts = {"limit_exceeded_confirmed": confirmed}
+    if collected == len(results):
+        facts["concurrency_limit_ok"] = False
+    elif confirmed:
+        facts["concurrency_limit_ok"] = True
+    return facts
+
+
 async def _concurrency(case, config, obs) -> None:
     limit = config.limits.get("collector_concurrency")
     if type(limit) is not int or limit < 1:
@@ -331,6 +355,7 @@ async def _concurrency(case, config, obs) -> None:
     obs.facts["limit_plus_one_sent"] = True
     obs.notes["concurrent_results"] = [
         code if page is None else (list(page.failures) or "collected") for page, code in results]
+    obs.facts.update(_limit_facts(results, limit))
     await _recovery(case, config, obs)
 
 
