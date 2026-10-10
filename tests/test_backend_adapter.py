@@ -90,6 +90,18 @@ def test_caller_run_id_is_sent_and_reported(backend_case, configured_backend, wr
     assert len(seen) == 1
 
 
+def test_callback_failure_case_uses_the_same_submission_and_lookup(configured_backend, write_backend_contract):
+    from isolation_tests.manifest import load_cases
+    from pathlib import Path
+
+    manifest = Path(__file__).resolve().parents[1] / "tools" / "isolation-tests" / "cases.json"
+    case = next(c for c in load_cases(manifest) if c.id == "INT-04")
+    config = with_contract(configured_backend, write_backend_contract, **FULL)
+    handler = linked_handler(pending=0)
+    result = run(case, config, handler)
+    assert (result.case_id, result.status, result.reason) == ("INT-04", "passed", "backend_result_linked")
+
+
 @pytest.mark.parametrize("name", [None, "missing.json"])
 def test_missing_contract_is_blocked(backend_case, configured_backend, tmp_path, name):
     config = replace(configured_backend, backend_contract=None if name is None else tmp_path / name)

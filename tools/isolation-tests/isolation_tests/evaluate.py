@@ -255,11 +255,15 @@ def merge_analysis(case: CaseSpec, variant: str, base: Outcome, analysis: Outcom
                    {**base.details, "analysis": dict(analysis.details), "base_status": base.status})
 
 
-def combine(base: Outcome, other: Outcome | None, label: str) -> Outcome:
-    """Worse status wins (failed > blocked > not_run > passed); ``other`` is kept under ``label``."""
+def combine(base: Outcome, other: Outcome | None, label: str, *, prefer_other: bool = False) -> Outcome:
+    """Worse status wins (failed > blocked > not_run > passed); ``other`` is kept under ``label``.
+
+    With ``prefer_other`` an equal status reports ``other``'s reason (the more specific cause).
+    """
     if other is None:
         return base
-    worst = min((base, other), key=lambda item: _PRIORITY.index(item.status))
+    pair = (other, base) if prefer_other else (base, other)
+    worst = min(pair, key=lambda item: _PRIORITY.index(item.status))
     details = {**base.details, label: {"status": other.status, "reason": other.reason,
                                        **dict(other.details)}}
     return Outcome(base.case_id, base.variant, worst.status, worst.reason, details)

@@ -27,6 +27,7 @@ _BOOLEAN_FACTS = {
     "firewall_drop_observed", "remote_job_terminated", "recovery_ok", "caps_ok",
     "sandbox_ok", "readonly_ok", "mounts_ok", "environment_names_ok", "digest_ok",
     "replacement_ok", "kakao_received", "collection", "analysis", "no_new_privileges_ok",
+    "callback_failure_observed", "lookup_fallback_ok",
 }
 _COUNT_FACTS = {"children_remaining", "download_temporary_bytes", "download_remaining_bytes"}
 

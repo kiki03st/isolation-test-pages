@@ -42,6 +42,8 @@ BOOLEAN_FACTS = frozenset({
     "probe_in_container", "authentication_ok", "authentication_rejected", "tls_rejected",
     "backend_result_ok", "first_response_deadline_ok", "collector_deadline_ok",
     "fallback_ok", "callback_failure_recorded", "false_success_reported",
+    # INT-04 callback failure: admin attestation and the runner's own BE lookup.
+    "callback_failure_observed", "lookup_fallback_ok",
     # Collection, network, session, limits and analysis.
     "actual_byte_limit_ok", "boundary_results_ok", "concurrency_limit_known",
     "concurrency_limit_ok", "context_fresh", "deadline_met", "disabled_readonly_ok",

@@ -3313,17 +3313,16 @@
           "callback-failure": {
             "inputs": {},
             "assertions": {
-              "failure_codes": [
-                "callback_failed"
-              ],
               "required_facts": {
-                "callback_failure_recorded": true,
+                "callback_failure_observed": true,
+                "lookup_fallback_ok": true,
                 "false_success_reported": false,
                 "positive_control_ok": true
               }
             },
             "required_evidence": [
-              "callback_failure_recorded",
+              "callback_failure_observed",
+              "lookup_fallback_ok",
               "false_success_reported"
             ],
             "required_capabilities": [

@@ -27,6 +27,8 @@ from .collector import HARD_RESPONSE_BYTES, CollectionError
 
 
 CASE_ID = "INT-03"
+# INT-04 callback-failure reuses the same submission and lookup-fallback path.
+CASE_IDS = frozenset({CASE_ID, "INT-04"})
 VARIANT = "pipeline"
 CONTRACT_FIELDS = frozenset({
     "submit_url", "utterance_path", "initial_callback_flag_path", "job_id_path",
@@ -272,7 +274,7 @@ async def _flow(case, contract, headers, client, run_id=None):
 
 
 async def _probe(case: CaseSpec, config: RuntimeConfig, client, run_id=None) -> Outcome:
-    if case.id != CASE_ID:
+    if case.id not in CASE_IDS:
         raise _blocked("unsupported_case")
     contract = load_contract(config.backend_contract, config.allow_loopback_http)
     headers = _headers(contract)

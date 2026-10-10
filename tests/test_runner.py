@@ -598,6 +598,80 @@ def test_kakao_receipt_requires_this_runs_be_submission_and_bound_receipt(cases,
     assert outcome.status == "blocked"
 
 
+CALLBACK_RECORD = {"callback_failure_observed": True, "false_success_reported": False,
+                   "positive_control_ok": True}
+
+
+def test_callback_failure_contract_is_run_bound_submission_lookup_and_admin_record(cases):
+    from isolation_tests.evidence import validate_facts
+
+    contract = cases["INT-04"].expected_observations["variants"]["callback-failure"]
+    assert "failure_codes" not in contract["assertions"]
+    assert contract["assertions"]["required_facts"] == {
+        "callback_failure_observed": True, "lookup_fallback_ok": True,
+        "false_success_reported": False, "positive_control_ok": True}
+    assert {"callback_failure_observed", "lookup_fallback_ok"} <= set(contract["required_evidence"])
+    validate_facts({"variant": "callback-failure", "callback_failure_observed": True,
+                    "lookup_fallback_ok": True})
+
+
+def _backend(status, reason, seen=None):
+    async def probe(case, config, **kwargs):
+        if seen is not None:
+            seen.append((case.id, kwargs.get("run_id")))
+        return Outcome(case.id, "pipeline", status, reason,
+                       {"run_id": kwargs.get("run_id"), "callback_deferred": True})
+    return probe
+
+
+def test_callback_failure_passes_with_linked_lookup_and_bound_admin_record(cases, config, evidence_dir, monkeypatch):
+    from isolation_tests import runner
+
+    seen = []
+    monkeypatch.setattr(runner, "PROBE_BACKEND", _backend("passed", "backend_result_linked", seen))
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector())
+    _write_evidence(evidence_dir, "run-cb-a", "INT-04", "callback-failure", CALLBACK_RECORD)
+    outcome = _run(runner.run_case(cases["INT-04"], "callback-failure", config, "run-cb-a"))
+    assert seen == [("INT-04", "run-cb-a")]
+    assert outcome.details["observed_facts"]["lookup_fallback_ok"] is True
+    assert outcome.details["backend"]["reason"] == "backend_result_linked"
+    assert outcome.status == "passed", outcome
+
+
+@pytest.mark.parametrize("status,reason,expected", [
+    ("blocked", "backend_contract_missing", ("blocked", "backend_contract_missing")),
+    ("blocked", "backend_result_contract_missing", ("blocked", "backend_result_contract_missing")),
+    ("blocked", "echo_response_not_result", ("blocked", "echo_response_not_result")),
+    ("failed", "backend_result_not_linked", ("failed", "backend_result_not_linked")),
+])
+def test_callback_failure_admin_record_alone_never_passes(cases, config, evidence_dir, monkeypatch,
+                                                           status, reason, expected):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "PROBE_BACKEND", _backend(status, reason))
+    _write_evidence(evidence_dir, "run-cb-b", "INT-04", "callback-failure", CALLBACK_RECORD)
+    outcome = _run(runner.run_case(cases["INT-04"], "callback-failure", config, "run-cb-b"))
+    assert (outcome.status, outcome.reason) == expected
+
+
+def test_callback_failure_lookup_without_admin_record_is_blocked(cases, config, monkeypatch):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "PROBE_BACKEND", _backend("passed", "backend_result_linked"))
+    outcome = _run(runner.run_case(cases["INT-04"], "callback-failure", config, "run-cb-c"))
+    assert outcome.status == "blocked"
+
+
+def test_callback_failure_record_from_another_window_is_blocked(cases, config, evidence_dir, monkeypatch):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "PROBE_BACKEND", _backend("passed", "backend_result_linked"))
+    _write_evidence(evidence_dir, "run-cb-d", "INT-04", "callback-failure", CALLBACK_RECORD,
+                    window=("2020-01-01T00:00:00Z", "2020-01-01T00:00:30Z"))
+    outcome = _run(runner.run_case(cases["INT-04"], "callback-failure", config, "run-cb-d"))
+    assert (outcome.status, outcome.reason) == ("blocked", "evidence_window_mismatch")
+
+
 def test_runner_transport_failure_is_not_overridden_by_admin_facts(cases, config, evidence_dir, monkeypatch):
     from isolation_tests import runner
     from isolation_tests.adapters.collector import CollectionError

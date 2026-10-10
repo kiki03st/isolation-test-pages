@@ -62,7 +62,7 @@ _BATCH = re.compile(r"r[0-9a-f]{32}\Z")
 # Administrator evidence only; the runner takes no action for these.
 EVIDENCE_ONLY = frozenset({
     ("NET-05", None), ("HOST-01", None), ("HOST-02", None), ("HOST-03", None),
-    ("INT-02", None), ("REC-01", None), ("INT-04", "callback-failure"),
+    ("INT-02", None), ("REC-01", None),
 })
 # Collector errors that are the observation a variant expects (a rejection).
 # Any other error after the runner acted leaves the trial inconclusive.
@@ -340,11 +340,16 @@ async def _route(case: CaseSpec, variant: str, config: RuntimeConfig, obs: Obser
     if (case.id, None) in EVIDENCE_ONLY or (case.id, variant) in EVIDENCE_ONLY:
         return
     obs.actions = True
-    if case.id == "INT-03":
-        # Both variants submit through the BE with this trial's run_id; a Kakao
-        # receipt record must then be bound to that run_id and window.
+    if case.id == "INT-03" or (case.id, variant) == ("INT-04", "callback-failure"):
+        # Submit through the BE with this trial's run_id; a Kakao receipt or a
+        # callback-failure record must then be bound to that run_id and window.
         with _Stage(obs, "backend"):
             obs.backend = await PROBE_BACKEND(case, config, run_id=obs.run_id)
+        if case.id == "INT-04" and obs.backend.status in {"passed", "failed"}:
+            # The runner's own lookup (the fallback path): the stored result linked
+            # to this run_id. Kept apart from the admin's callback attestation.
+            obs.facts["lookup_fallback_ok"] = (
+                obs.backend.status == "passed" and obs.backend.reason == "backend_result_linked")
         if variant == "pipeline":
             obs.facts["backend_result_ok"] = obs.backend.status == "passed"
             if type(obs.backend.details.get("first_response_deadline_ok")) is bool:
@@ -557,7 +562,7 @@ def judge(case: CaseSpec, variant: str, obs: Observation, config: RuntimeConfig)
     if case.id in HOST_CASES and (admin is not None or probe is not None):
         outcome = combine(outcome, validate_host_evidence(case.id, evidence), "host_evidence")
     outcome = merge_analysis(case, variant, outcome, obs.analysis)
-    outcome = combine(outcome, obs.backend, "backend")
+    outcome = combine(outcome, obs.backend, "backend", prefer_other=True)
     if case.recovery_case is not None and obs.actions:
         recovery = None if obs.recovery is None else Outcome(
             case.recovery_case, CONTROL_VARIANT, obs.recovery["status"], str(obs.recovery["reason"]),
