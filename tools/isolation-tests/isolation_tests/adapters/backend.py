@@ -22,6 +22,7 @@ import httpx
 
 from ..config import _unique_object, _url
 from ..model import CaseSpec, Outcome, RuntimeConfig
+from ..receiver import RUN_ID
 from .collector import HARD_RESPONSE_BYTES, CollectionError
 
 
@@ -243,8 +244,8 @@ async def _submit(client, contract, headers, body, run_id):
         raise _failed("first_response_timeout", run_id=run_id)
 
 
-async def _flow(case, contract, headers, client):
-    run_id = "be" + secrets.token_hex(8)
+async def _flow(case, contract, headers, client, run_id=None):
+    run_id = run_id or "be" + secrets.token_hex(8)
     text = f"{case.message} {run_id}".strip()
     body = _request_body(contract["utterance_path"], text)
     details: dict = {"run_id": run_id}
@@ -270,7 +271,7 @@ async def _flow(case, contract, headers, client):
     return Outcome(case.id, VARIANT, "passed", "backend_result_linked", details)
 
 
-async def _probe(case: CaseSpec, config: RuntimeConfig, client) -> Outcome:
+async def _probe(case: CaseSpec, config: RuntimeConfig, client, run_id=None) -> Outcome:
     if case.id != CASE_ID:
         raise _blocked("unsupported_case")
     contract = load_contract(config.backend_contract, config.allow_loopback_http)
@@ -278,7 +279,7 @@ async def _probe(case: CaseSpec, config: RuntimeConfig, client) -> Outcome:
     total = contract["max_initial_s"] + contract["max_result_s"] + 2
     async with asyncio.timeout(total):
         if client is not None:
-            return await _flow(case, contract, headers, client)
+            return await _flow(case, contract, headers, client, run_id)
         try:
             context = ssl.create_default_context(
                 cafile=str(config.ca_file) if config.ca_file else certifi.where())
@@ -286,7 +287,7 @@ async def _probe(case: CaseSpec, config: RuntimeConfig, client) -> Outcome:
             raise _blocked("backend_ca_file_unusable") from None
         async with httpx.AsyncClient(verify=context, follow_redirects=False,
                                      trust_env=False, timeout=total) as owned:
-            return await _flow(case, contract, headers, owned)
+            return await _flow(case, contract, headers, owned, run_id)
 
 
 def _is_tls(error: BaseException) -> bool:
@@ -299,10 +300,17 @@ def _is_tls(error: BaseException) -> bool:
 
 
 async def probe_backend(case: CaseSpec, config: RuntimeConfig, *,
-                        client: httpx.AsyncClient | None = None) -> Outcome:
-    """Observe the BE first response and, if a contract exists, its linked result."""
+                        client: httpx.AsyncClient | None = None,
+                        run_id: str | None = None) -> Outcome:
+    """Observe the BE first response and, if a contract exists, its linked result.
+
+    ``run_id`` (the runner's per-trial id) is sent in the utterance so that
+    administrator evidence such as a Kakao receipt can be bound to this submission.
+    """
+    if run_id is not None and (not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id)):
+        return Outcome(case.id, VARIANT, "blocked", "invalid_run_id", {})
     try:
-        return await _probe(case, config, client)
+        return await _probe(case, config, client, run_id)
     except _Stop as stop:
         status, code, details = stop.status, stop.code, dict(stop.details)
     except CollectionError:

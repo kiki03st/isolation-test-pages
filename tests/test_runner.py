@@ -458,37 +458,183 @@ def test_backend_pipeline_combines_backend_and_admin_evidence(cases, config, evi
     assert _run(runner.run_case(cases["INT-03"], "pipeline", config, "run-be2")).status == "failed"
 
 
-def _probe_file(evidence_dir, **facts):
+BATCH = "r" + "b" * 32
+
+
+def _iso(offset_seconds=0):
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)).isoformat()
+
+
+def _probe_file(evidence_dir, name="host-probe-container.json", *, run_id=BATCH, collected_at=None,
+                boundary="container", **facts):
     base = {"environment_names_ok": True, "platform": "linux", "unsupported_boundary": False,
-            "boundary": "container", "positive_control_ok": True, "uid_ok": True, "caps_ok": True,
+            "boundary": boundary, "positive_control_ok": True, "uid_ok": True, "caps_ok": True,
             "seccomp_ok": True, "no_new_privileges_ok": True, "mounts_ok": True,
             "write_probe_applicable": True, "readonly_ok": True, "cpu_limit": 1.5,
             "memory_limit_mib": 1536, "pids_limit": 256, "shm_mib": 256, "tmpfs_mib": 256,
             "resource_profile_recorded": True, "resource_limits_ok": True}
-    path = evidence_dir / "host-probe-container.json"
-    path.write_text(json.dumps({"schema": "host-probe-v1", "facts": {**base, **facts}}), encoding="utf-8")
+    document = {"schema": "host-probe-v1", "facts": {**base, **facts},
+                "collected_at": collected_at if collected_at is not None else _iso(2)}
+    if run_id is not None:
+        document["run_id"] = run_id
+    path = evidence_dir / name
+    path.write_text(json.dumps(document), encoding="utf-8")
     return path
 
 
-def test_host_probe_output_becomes_evidence_with_resource_profile(cases, config, evidence_dir, monkeypatch):
+def _host(case_id, variant):
+    from isolation_tests.runner import host_run_id
+
+    return host_run_id(BATCH, case_id, variant)
+
+
+def test_host_run_ids_share_an_unguessable_batch_and_stay_unique():
+    from isolation_tests.receiver import RUN_ID
+    from isolation_tests.runner import host_run_id, probe_batch_id
+
+    pairs = [("HOST-01", "process"), ("HOST-01", "sandbox"), ("HOST-03", "context-cleanup")]
+    ids = {host_run_id(BATCH, c, v) for c, v in pairs}
+    assert len(ids) == 3 and all(RUN_ID.fullmatch(i) for i in ids)
+    assert {probe_batch_id(c, v, host_run_id(BATCH, c, v)) for c, v in pairs} == {BATCH}
+    assert probe_batch_id("HOST-01", "process", "run-host") is None
+
+
+def test_host_probe_bound_to_the_run_becomes_evidence_with_resource_profile(cases, config, evidence_dir, monkeypatch):
     from isolation_tests import runner
 
     fake = FakeCollector()
     monkeypatch.setattr(runner, "COLLECT", fake)
     _probe_file(evidence_dir)
-    outcome = _run(runner.run_case(cases["HOST-01"], "process", config, "run-host"))
+    outcome = _run(runner.run_case(cases["HOST-01"], "process", config, _host("HOST-01", "process")))
     assert outcome.status == "passed", outcome
     assert outcome.details["resource_profile"] == {
         "cpu_limit": 1.5, "memory_limit_mib": 1536, "pids_limit": 256, "shm_mib": 256, "tmpfs_mib": 256}
     assert fake.calls == []
 
 
-def test_windows_or_mismatched_host_probe_is_blocked(cases, config, evidence_dir, monkeypatch):
+@pytest.mark.parametrize("probe", [
+    {"run_id": "r" + "c" * 32},                     # another run
+    {"run_id": None},                               # legacy probe without a run id
+    {"collected_at": "2020-01-01T00:00:00+00:00"},  # before this run issued its id
+    {"collected_at": "2026-10-10T00:00:00"},        # naive timestamp
+    {"collected_at": "far-future"},                 # long after the run: not this run's state
+])
+def test_stale_or_foreign_host_probe_never_passes(cases, config, evidence_dir, monkeypatch, probe):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector())
+    if probe.get("collected_at") == "far-future":
+        probe = {"collected_at": _iso(3 * 86400)}
+    _probe_file(evidence_dir, **probe)
+    outcome = _run(runner.run_case(cases["HOST-01"], "process", config, _host("HOST-01", "process")))
+    assert outcome.status == "blocked"
+
+
+def test_probe_is_not_used_for_a_run_id_without_the_batch(cases, config, evidence_dir):
+    from isolation_tests import runner
+
+    _probe_file(evidence_dir)
+    outcome = _run(runner.run_case(cases["HOST-01"], "process", config, "run-host"))
+    assert outcome.status == "blocked"
+
+
+def test_each_host_case_uses_the_probe_of_its_required_boundary(cases, config, evidence_dir):
+    from isolation_tests import runner
+
+    _probe_file(evidence_dir, "host-probe-container.json", boundary="container")
+    outcome = _run(runner.run_case(cases["HOST-03"], "context-cleanup", config,
+                                   _host("HOST-03", "context-cleanup")))
+    assert outcome.details["notes"].get("host_probe") is None  # container probe not used for host
+    _probe_file(evidence_dir, "host-probe-host.json", boundary="host", write_probe_applicable=False)
+    outcome = _run(runner.run_case(cases["HOST-03"], "context-cleanup", config,
+                                   _host("HOST-03", "context-cleanup")))
+    assert outcome.details["notes"]["host_probe"] == "host-probe-host.json"
+    outcome = _run(runner.run_case(cases["HOST-01"], "process", config, _host("HOST-01", "process")))
+    assert outcome.details["notes"]["host_probe"] == "host-probe-container.json"
+    assert outcome.status == "passed", outcome
+
+
+def test_windows_or_mismatched_host_probe_is_blocked(cases, config, evidence_dir):
     from isolation_tests import runner
 
     _probe_file(evidence_dir, boundary_declared="host")
-    outcome = _run(runner.run_case(cases["HOST-01"], "process", config, "run-host"))
+    outcome = _run(runner.run_case(cases["HOST-01"], "process", config, _host("HOST-01", "process")))
     assert (outcome.status, outcome.reason) == ("blocked", "boundary_mismatch")
+
+
+def test_kakao_receipt_requires_this_runs_be_submission_and_bound_receipt(cases, config, evidence_dir, monkeypatch):
+    from isolation_tests import runner
+
+    seen = []
+
+    async def probe(case, config, **kwargs):
+        seen.append(kwargs.get("run_id"))
+        return Outcome(case.id, "pipeline", "passed", "backend_result_linked",
+                       {"run_id": kwargs.get("run_id"), "first_response_deadline_ok": True})
+
+    monkeypatch.setattr(runner, "PROBE_BACKEND", probe)
+    caps = replace(config, capabilities=config.capabilities | {"kakao_receipt"})
+    receipt = {"kakao_received": True, "evidence_source": "observed", "positive_control_ok": True}
+    _write_evidence(evidence_dir, "run-kakao-a", "INT-03", "kakao-receipt", receipt)
+    outcome = _run(runner.run_case(cases["INT-03"], "kakao-receipt", caps, "run-kakao-a"))
+    assert seen == ["run-kakao-a"]
+    assert outcome.status == "passed", outcome
+
+    # A receipt from another time window is not linked to this submission.
+    _write_evidence(evidence_dir, "run-kakao-b", "INT-03", "kakao-receipt", receipt,
+                    window=("2020-01-01T00:00:00Z", "2020-01-01T00:00:30Z"))
+    outcome = _run(runner.run_case(cases["INT-03"], "kakao-receipt", caps, "run-kakao-b"))
+    assert (outcome.status, outcome.reason) == ("blocked", "evidence_window_mismatch")
+
+    # Without a successful submission in this run the receipt proves nothing.
+    async def failing(case, config, **kwargs):
+        return Outcome(case.id, "pipeline", "blocked", "backend_contract_missing", {})
+
+    monkeypatch.setattr(runner, "PROBE_BACKEND", failing)
+    _write_evidence(evidence_dir, "run-kakao-c", "INT-03", "kakao-receipt", receipt)
+    outcome = _run(runner.run_case(cases["INT-03"], "kakao-receipt", caps, "run-kakao-c"))
+    assert outcome.status == "blocked"
+
+
+def test_runner_transport_failure_is_not_overridden_by_admin_facts(cases, config, evidence_dir, monkeypatch):
+    from isolation_tests import runner
+    from isolation_tests.adapters.collector import CollectionError
+
+    class ModeCollector(FakeCollector):
+        async def __call__(self, config, url, token_mode="valid"):
+            if token_mode != "valid":
+                raise CollectionError("collector_unavailable")
+            return await super().__call__(config, url, token_mode)
+
+    monkeypatch.setattr(runner, "COLLECT", ModeCollector())
+    _write_evidence(evidence_dir, "run-int1-x", "INT-01", "missing",
+                    {"authentication_rejected": True, "page_opened": False})
+    outcome = _run(runner.run_case(cases["INT-01"], "missing", config, "run-int1-x"))
+    assert (outcome.status, outcome.reason) == ("blocked", "runner_observation_inconclusive")
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-01": CollectionError("runner_timeout")}))
+    _write_evidence(evidence_dir, "run-net-t", "NET-01", "img", {
+        "receiver_control_ok": True, "request_blocked": True, "receiver_observed": False})
+    outcome = _run(runner.run_case(cases["NET-01"], "img", config, "run-net-t"))
+    assert (outcome.status, outcome.reason) == ("blocked", "runner_observation_inconclusive")
+
+
+def test_failed_recovery_request_is_failed(cases, config, evidence_dir, monkeypatch):
+    from isolation_tests import runner
+    from isolation_tests.adapters.collector import CollectionError
+
+    state = {"n": 0}
+
+    def col01(url):
+        state["n"] += 1
+        return _page(url) if state["n"] == 1 else CollectionError("collector_unavailable")
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"LIM-01": _limit_page, "col-01": col01}))
+    _limit_admin(evidence_dir, "run-lim-r")
+    outcome = _run(runner.run_case(cases["LIM-01"], "delay-15s", config, "run-lim-r"))
+    assert (outcome.status, outcome.reason) == ("failed", "recovery_failed")
 
 
 def test_recovery_case_uses_evidence_only(cases, config, monkeypatch):
@@ -655,6 +801,58 @@ def test_report_subcommand_rejudges_with_evidence_added_after_the_run(config_fil
     assert items[("NET-01", "script")]["status"] == "blocked"
 
 
+def test_host_variants_in_one_run_share_a_batch_prefix(config_file, tmp_path, monkeypatch, capsys):
+    from isolation_tests import runner
+    from isolation_tests.runner import probe_batch_id
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector())
+    out = tmp_path / "host"
+    runner.main(["run", "--manifest", str(MANIFEST), "--config", str(config_file),
+                 "--output", str(out), "--group", "host"])
+    items = [i for i in _report(out)["items"] if i["status"] != "not_run"]
+    batches = {probe_batch_id(i["case_id"], i["variant"], i["details"]["run_id"]) for i in items}
+    assert len(batches) == 1 and None not in batches
+    assert f"host_batch\t{batches.pop()}" in capsys.readouterr().out
+    assert len({i["details"]["run_id"] for i in items}) == len(items)
+
+
+def test_collector_limit_over_eight_blocks_only_the_concurrency_trial(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+
+    monkeypatch.setenv("TEST_ONLY_TOKEN", "synthetic-runner-token")
+    fake = FakeCollector()
+    monkeypatch.setattr(runner, "COLLECT", fake)
+    out = tmp_path / "lim6"
+    code = runner.main(["run", "--manifest", str(MANIFEST), "--config", str(config_file),
+                        "--output", str(out), "--case", "LIM-06", "--collector-limit", "9"])
+    assert code == 2
+    items = {(i["case_id"], i["variant"]): i for i in _report(out)["items"]}
+    assert (items[("LIM-06", "concurrency")]["status"],
+            items[("LIM-06", "concurrency")]["reason"]) == ("blocked", "concurrency_trial_exceeds_cap")
+    assert fake.calls == []
+
+
+def test_unexpected_exception_blocks_only_that_trial(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+
+    monkeypatch.setenv("TEST_ONLY_TOKEN", "synthetic-runner-token")
+
+    def boom(url):
+        return RuntimeError("internal detail synthetic-runner-token")
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"col-02": boom}))
+    out = tmp_path / "boom"
+    runner.main(["run", "--manifest", str(MANIFEST), "--config", str(config_file),
+                 "--output", str(out), "--group", "collection"])
+    data = _report(out)
+    items = {(i["case_id"], i["variant"]): i for i in data["items"]}
+    assert (items[("COL-02", "default")]["status"], items[("COL-02", "default")]["reason"]) == (
+        "blocked", "runner_internal_error")
+    assert items[("COL-01", "default")]["status"] == "passed"
+    assert items[("COL-03", "default")]["status"] != "not_run"
+    assert "internal detail" not in json.dumps(data)
+
+
 def test_check_env_reports_stub_as_blocked_collection(config_file, monkeypatch, capsys):
     from isolation_tests import runner
     from isolation_tests.adapters.collector import CollectionError
@@ -724,6 +922,6 @@ def test_list_and_host_probe_subcommands_still_work(tmp_path, capsys):
     assert runner.main(["list", "--manifest", str(MANIFEST)]) == 0
     assert "COL-01" in capsys.readouterr().out
     output = tmp_path / "probe.json"
-    code = runner.main(["host-probe", "--output", str(output)])
+    code = runner.main(["host-probe", "--output", str(output), "--run-id", "r" + "a" * 32])
     assert code in {0, 2}
     assert json.loads(output.read_text(encoding="utf-8"))["schema"] == "host-probe-v1"

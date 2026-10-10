@@ -53,12 +53,24 @@ STATIC_ROOT = Path(__file__).resolve().parents[3] / "test-pages"
 CONTROL_CASE, CONTROL_VARIANT = "COL-01", "default"
 CONCURRENCY_SAMPLE = ("LIM-02", "slow-stream")
 RESOURCE_FACTS = ("cpu_limit", "memory_limit_mib", "pids_limit", "shm_mib", "tmpfs_mib")
-PROBE_CASES = frozenset({"HOST-01", "HOST-02", "HOST-03"})
+# The boundary whose host-probe output a HOST case is judged on.
+PROBE_BOUNDARY = {"HOST-01": "container", "HOST-02": "container", "HOST-03": "host"}
+PROBE_CASES = frozenset(PROBE_BOUNDARY)
+# A probe must be collected after the run issued its batch id, and soon after.
+MAX_PROBE_DELAY = timedelta(hours=24)
+_BATCH = re.compile(r"r[0-9a-f]{32}\Z")
 # Administrator evidence only; the runner takes no action for these.
 EVIDENCE_ONLY = frozenset({
     ("NET-05", None), ("HOST-01", None), ("HOST-02", None), ("HOST-03", None),
-    ("INT-02", None), ("REC-01", None), ("INT-03", "kakao-receipt"), ("INT-04", "callback-failure"),
+    ("INT-02", None), ("REC-01", None), ("INT-04", "callback-failure"),
 })
+# Collector errors that are the observation a variant expects (a rejection).
+# Any other error after the runner acted leaves the trial inconclusive.
+EXPECTED_ERRORS = {
+    ("INT-01", "missing"): frozenset({"authentication_failed"}),
+    ("INT-01", "wrong-token"): frozenset({"authentication_failed"}),
+    ("INT-01", "untrusted-ca"): frozenset({"tls_verification_failed"}),
+}
 ANALYSIS_CASES = frozenset({f"ANA-0{n}" for n in range(1, 8)})
 PAIRED = {"ANA-07": {"baseline": "injection", "injection": "baseline"}}
 _BLOCKING_CODES = PREPARATION_CODES | {"stub_not_collected"}
@@ -75,6 +87,20 @@ def _now() -> str:
 def new_run_id() -> str:
     """An unguessable per-(case, variant) id: receiver events are forgeable by id alone."""
     return "r" + secrets.token_hex(16)
+
+
+def host_run_id(batch: str, case_id: str, variant: str) -> str:
+    """HOST variants of one run share the unguessable batch id the host probe records."""
+    return f"{batch}-{case_id.lower()}-{variant}"
+
+
+def probe_batch_id(case_id: str, variant: str, run_id: str) -> str | None:
+    """The batch id a host probe must carry for this HOST trial, or None."""
+    suffix = f"-{case_id.lower()}-{variant}"
+    if case_id not in PROBE_CASES or not isinstance(run_id, str) or not run_id.endswith(suffix):
+        return None
+    batch = run_id[:-len(suffix)]
+    return batch if _BATCH.fullmatch(batch) else None
 
 
 @lru_cache(maxsize=1)
@@ -174,8 +200,12 @@ def _runner_evidence(run_id: str, case_id: str, variant: str, started: str, fact
     return Evidence(run_id, case_id, started, _now(), {"variant": variant, **facts})
 
 
-async def _normal_request(config: RuntimeConfig) -> dict:
-    """One COL-01 collection judged on the runner's own observation."""
+async def _normal_request(config: RuntimeConfig, *, recovery: bool = False) -> dict:
+    """One COL-01 collection judged on the runner's own observation.
+
+    After a limit trial (``recovery``) a failed normal request is non-compliance:
+    ``failed``, unless the failure is a setup problem.
+    """
     case = _canonical()[CONTROL_CASE]
     run_id, started = new_run_id(), _now()
     try:
@@ -186,7 +216,8 @@ async def _normal_request(config: RuntimeConfig) -> dict:
     page, code = await _collect(config, url)
     details = {"run_id": run_id, "elapsed_ms": int((time.monotonic() - begin) * 1000)}
     if page is None:
-        return {"status": "blocked", "reason": code, "details": details}
+        status = "failed" if recovery and code not in _BLOCKING_CODES else "blocked"
+        return {"status": status, "reason": code, "details": details}
     outcome = evaluate(case, CONTROL_VARIANT, page,
                        _runner_evidence(run_id, case.id, CONTROL_VARIANT, started, {"collection": True}),
                        config.capabilities)
@@ -204,7 +235,7 @@ async def _recovery(case: CaseSpec, config: RuntimeConfig, obs: Observation) -> 
     if case.recovery_case is None:
         return
     with _Stage(obs, "recovery"):
-        obs.recovery = await _normal_request(config)
+        obs.recovery = await _normal_request(config, recovery=True)
 
 
 def _apply_analysis(obs: Observation, outcome: Outcome) -> None:
@@ -310,11 +341,14 @@ async def _route(case: CaseSpec, variant: str, config: RuntimeConfig, obs: Obser
         return
     obs.actions = True
     if case.id == "INT-03":
+        # Both variants submit through the BE with this trial's run_id; a Kakao
+        # receipt record must then be bound to that run_id and window.
         with _Stage(obs, "backend"):
-            obs.backend = await PROBE_BACKEND(case, config)
-        obs.facts["backend_result_ok"] = obs.backend.status == "passed"
-        if type(obs.backend.details.get("first_response_deadline_ok")) is bool:
-            obs.facts["first_response_deadline_ok"] = obs.backend.details["first_response_deadline_ok"]
+            obs.backend = await PROBE_BACKEND(case, config, run_id=obs.run_id)
+        if variant == "pipeline":
+            obs.facts["backend_result_ok"] = obs.backend.status == "passed"
+            if type(obs.backend.details.get("first_response_deadline_ok")) is bool:
+                obs.facts["first_response_deadline_ok"] = obs.backend.details["first_response_deadline_ok"]
         return
     if case.id in {"ANA-08", "LIM-04"}:
         with _Stage(obs, "analysis"):
@@ -404,24 +438,58 @@ def _probe_files(directory: Path):
             continue
         if isinstance(data, dict) and data.get("schema") == "host-probe-v1" \
                 and isinstance(data.get("facts"), dict):
-            yield entry.name, data["facts"]
+            yield entry.name, data
 
 
-def _probe_facts(case: CaseSpec, config: RuntimeConfig, notes: dict):
-    """Convert one ``host-probe-v1`` output in the evidence directory into facts."""
-    if case.id not in PROBE_CASES or config.evidence_dir is None:
+def _collected_at(value) -> "datetime | None":
+    from datetime import datetime, timezone
+
+    if not isinstance(value, str) or len(value) > 40:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo is not None else None
+
+
+def _probe_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evidence | None,
+                 config: RuntimeConfig, notes: dict):
+    """Facts of the one ``host-probe-v1`` output bound to this run, or None.
+
+    A probe counts only when it carries this run's unguessable batch id, was
+    collected (timezone-aware) after the run started and within MAX_PROBE_DELAY
+    (and inside the administrator record's window when one exists), and comes
+    from the boundary the case requires. Anything else is stale or foreign.
+    """
+    batch = probe_batch_id(case.id, variant, obs.run_id)
+    if batch is None or config.evidence_dir is None:
         return None, None
     try:
         found = list(_probe_files(config.evidence_dir))
-    except OSError:
+        run_start = parse_utc(obs.started_at)
+        window = (parse_utc(admin.started_at), parse_utc(admin.ended_at)) if admin else None
+    except (OSError, EvidenceUnavailable):
         return None, None
-    if len(found) > 1:
-        found = [item for item in found if item[1].get("boundary") == "container"]
-    if len(found) != 1:
-        if found:
-            notes["host_probe"] = "ambiguous"
+    slack = timedelta(seconds=MAX_CLOCK_OFFSET_SECONDS)
+    accepted, rejected = [], 0
+    for name, data in found:
+        at = _collected_at(data.get("collected_at"))
+        ok = (data.get("run_id") == batch and at is not None
+              and run_start - slack <= at <= run_start + MAX_PROBE_DELAY
+              and (window is None or window[0] - slack <= at <= window[1] + slack)
+              and data["facts"].get("boundary") == PROBE_BOUNDARY[case.id])
+        if ok:
+            accepted.append((name, data["facts"]))
+        else:
+            rejected += 1
+    if rejected:
+        notes["host_probe_rejected"] = rejected
+    if len(accepted) != 1:
+        if accepted:
+            notes["host_probe_ambiguous"] = len(accepted)
         return None, None
-    name, facts = found[0]
+    name, facts = accepted[0]
     notes["host_probe"] = name
     return {k: v for k, v in facts.items() if k != "variant"}, name
 
@@ -463,10 +531,13 @@ def judge(case: CaseSpec, variant: str, obs: Observation, config: RuntimeConfig)
         return finish(Outcome(case.id, variant, "blocked", obs.preblocked))
     if obs.error in _BLOCKING_CODES:
         return finish(Outcome(case.id, variant, "blocked", obs.error))
+    if obs.actions and obs.error is not None and obs.error not in EXPECTED_ERRORS.get((case.id, variant), ()):
+        # A transport failure the runner saw is not a block; admin facts cannot override it.
+        return finish(Outcome(case.id, variant, "blocked", "runner_observation_inconclusive"))
     admin = _admin_evidence(case, variant, obs, config, notes)
     if admin is not None and obs.actions and not _overlaps(admin, obs):
         return finish(Outcome(case.id, variant, "blocked", "evidence_window_mismatch"))
-    probe, probe_name = _probe_facts(case, config, notes)
+    probe, probe_name = _probe_facts(case, variant, obs, admin, config, notes)
     merged, conflict = _merge({"variant": variant}, obs.facts, admin.facts if admin else None, probe)
     if merged is None:
         return finish(Outcome(case.id, variant, "blocked", "evidence_conflict", {"conflict": conflict}))
@@ -506,14 +577,22 @@ async def run_case(case: CaseSpec, variant: str, config: RuntimeConfig, run_id: 
 
 # --- CLI -------------------------------------------------------------------------------
 
-def _host_probe(output: Path, boundary: str | None) -> int:
-    from .host_probes import collect_host_facts
+def _host_probe(output: Path, boundary: str | None, run_id: str) -> int:
+    from datetime import datetime, timezone
 
+    from .host_probes import collect_host_facts
+    from .receiver import RUN_ID
+
+    if not RUN_ID.fullmatch(run_id):
+        print("error: --run-id must be the batch id issued by the run", file=sys.stderr)
+        return 2
     facts = collect_host_facts(boundary=boundary)
+    document = {"schema": "host-probe-v1", "run_id": run_id,
+                "collected_at": datetime.now(timezone.utc).isoformat(), "facts": facts}
     try:
         # Exclusive create: never overwrite an existing evidence file.
         with output.open("x", encoding="utf-8") as handle:
-            json.dump({"schema": "host-probe-v1", "facts": facts}, handle,
+            json.dump(document, handle,
                       ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
     except OSError:
@@ -586,9 +665,14 @@ def _write(outcomes, output, metadata, config) -> int:
     return code
 
 
-async def _run_all(trials, config, results: list) -> None:
+async def _run_all(trials, config, results: list, batch: str) -> None:
     for case, variant in trials:
-        results.append(await run_case(case, variant, config, new_run_id()))
+        run_id = host_run_id(batch, case.id, variant) if case.id in PROBE_CASES else new_run_id()
+        try:
+            results.append(await run_case(case, variant, config, run_id))
+        except Exception:  # one broken trial must not lose the report; no exception text
+            results.append(Outcome(case.id, variant, "blocked", "runner_internal_error",
+                                   {"run_id": run_id}))
 
 
 def _run(arguments) -> int:
@@ -601,8 +685,8 @@ def _run(arguments) -> int:
         if arguments.pages_commit is not None and not _COMMIT.fullmatch(arguments.pages_commit):
             raise ValueError("pages commit must be a hexadecimal commit id")
         if arguments.collector_limit is not None:
-            if not 1 <= arguments.collector_limit <= MAX_CONCURRENT_TRIALS:
-                raise ValueError("collector limit must be between 1 and 8")
+            if arguments.collector_limit < 1:
+                raise ValueError("collector limit must be at least 1")
             config = replace(config, limits={**config.limits,
                                              "collector_concurrency": arguments.collector_limit})
     except (OSError, ValueError) as error:
@@ -612,8 +696,11 @@ def _run(arguments) -> int:
     started = _now()
     trials = [(case, variant) for case in selected for variant in case.variants]
     results: list[Outcome] = []
+    batch = new_run_id()  # shared by this run's HOST variants; `host-probe --run-id` records it
+    if any(case.id in PROBE_CASES for case, _ in trials):
+        print(f"host_batch	{batch}")
     try:
-        asyncio.run(_run_all(trials, config, results))
+        asyncio.run(_run_all(trials, config, results, batch))
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("interrupted: unfinished items are recorded as not_run", file=sys.stderr)
     finished = {(item.case_id, item.variant) for item in results}
@@ -757,10 +844,12 @@ def main(argv: list[str] | None = None) -> int:
         "host-probe", help="collect host facts; run by the administrator on the inspected host")
     probe.add_argument("--output", type=Path, required=True)
     probe.add_argument("--boundary", choices=("host", "container"))
+    probe.add_argument("--run-id", required=True,
+                       help="the batch id printed by `run` for the HOST cases of that run")
 
     arguments = parser.parse_args(argv)
     if arguments.command == "host-probe":
-        return _host_probe(arguments.output, arguments.boundary)
+        return _host_probe(arguments.output, arguments.boundary, arguments.run_id)
     if arguments.command == "list":
         return _list(arguments)
     if arguments.command == "check-env":

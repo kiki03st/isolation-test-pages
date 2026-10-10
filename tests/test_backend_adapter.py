@@ -64,6 +64,32 @@ def test_no_callback_url_is_injected(backend_case, configured_backend):
     assert set(seen[0]) == {"userRequest"} and set(seen[0]["userRequest"]) == {"utterance"}
 
 
+def test_caller_run_id_is_sent_and_reported(backend_case, configured_backend, write_backend_contract):
+    from isolation_tests.adapters.backend import probe_backend
+
+    config = with_contract(configured_backend, write_backend_contract, **FULL)
+    run_id = "r" + "e" * 32
+    seen = []
+
+    def handler(request):
+        if request.method == "POST":
+            seen.append(sent(request))
+            return httpx.Response(200, json={"jobId": "job-1"})
+        return httpx.Response(200, json={"result": {"evidence": "합성 결과 " + run_id}})
+
+    async def call(value):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await probe_backend(backend_case, config, client=client, run_id=value)
+
+    result = asyncio.run(call(run_id))
+    assert seen[0].endswith(run_id)
+    assert result.details["run_id"] == run_id
+    assert result.status == "passed", result
+    unsafe = asyncio.run(call("bad id"))
+    assert (unsafe.status, unsafe.reason) == ("blocked", "invalid_run_id")
+    assert len(seen) == 1
+
+
 @pytest.mark.parametrize("name", [None, "missing.json"])
 def test_missing_contract_is_blocked(backend_case, configured_backend, tmp_path, name):
     config = replace(configured_backend, backend_contract=None if name is None else tmp_path / name)

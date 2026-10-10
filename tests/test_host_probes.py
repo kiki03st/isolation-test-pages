@@ -108,12 +108,25 @@ def test_cli_host_probe_writes_names_only_and_refuses_overwrite(tmp_path, monkey
     from isolation_tests.runner import main
     monkeypatch.setenv("SYNTHETIC_API_KEY", SECRET)
     out = tmp_path / "probe.json"
-    code = main(["host-probe", "--output", str(out)])
+    run_id = "r" + "d" * 32
+    code = main(["host-probe", "--output", str(out), "--run-id", run_id])
     assert code in (0, 2)
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["schema"] == "host-probe-v1" and data["facts"]["environment_names_ok"] is False
+    assert data["run_id"] == run_id
+    from datetime import datetime
+    assert datetime.fromisoformat(data["collected_at"]).utcoffset() is not None
     assert SECRET not in out.read_text(encoding="utf-8") and SECRET not in capsys.readouterr().out
-    assert main(["host-probe", "--output", str(out)]) == 2
+    assert main(["host-probe", "--output", str(out), "--run-id", run_id]) == 2
+
+
+def test_cli_host_probe_requires_a_safe_run_id(tmp_path):
+    from isolation_tests.runner import main
+    out = tmp_path / "probe.json"
+    with pytest.raises(SystemExit):
+        main(["host-probe", "--output", str(out)])
+    assert main(["host-probe", "--output", str(out), "--run-id", "../x"]) == 2
+    assert not out.exists()
 
 
 # --- evidence contract -------------------------------------------------------
