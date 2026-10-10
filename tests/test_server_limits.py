@@ -369,9 +369,12 @@ def test_non_reading_client_cannot_stretch_the_response_lifetime(running_server,
         connection.settimeout(3)
         connection.connect((parts.hostname, parts.port))
         try:
-            started = time.monotonic()
             connection.sendall(
                 f"GET /v1/cases/LIM-03/large HTTP/1.1\r\nHost: {parts.netloc}\r\n\r\n".encode("ascii"))
+            # Wait until the handler really holds the slot. Waiting for 0 alone returns at once
+            # when a loaded machine has not scheduled the handler yet, which made this flaky.
+            base.slots.wait_for(1, timeout=10)
+            started = time.monotonic()
             base.slots.wait_for(0, timeout=5)  # the handler's own send timeout is 10 s
             elapsed = time.monotonic() - started
         finally:
