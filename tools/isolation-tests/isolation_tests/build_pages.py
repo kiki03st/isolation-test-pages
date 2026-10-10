@@ -231,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build public synthetic Pages fixtures")
     parser.add_argument("--manifest", type=Path, default=_DEFAULT_MANIFEST)
     parser.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT)
-    parser.add_argument("--commit-sha", required=True)
+    parser.add_argument("--commit-sha", "--commit", dest="commit_sha", required=True)
     parser.add_argument("--http-base", default=None, help="public HTTPS sample-server base URL")
     args = parser.parse_args(argv)
     try:
