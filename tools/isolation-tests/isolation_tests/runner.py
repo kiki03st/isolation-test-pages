@@ -34,12 +34,13 @@ from .adapters import collector as collector_adapter
 from .adapters.collector import PREPARATION_CODES, CollectionError
 from .evaluate import MAX_CONCURRENT_TRIALS, combine, evaluate, merge_analysis, merge_recovery
 from .evidence import (
-    MAX_CLOCK_OFFSET_SECONDS, EvidenceUnavailable, _read_bounded, load_evidence, parse_utc,
-    validate_facts,
+    CLOCK_FACT, MAX_CLOCK_OFFSET_SECONDS, EvidenceUnavailable, _read_bounded, load_evidence, parse_utc,
+    receiver_observed, validate_facts,
 )
 from .host_probes import HOST_CASES, validate_host_evidence
 from .manifest import load_cases
 from .model import CaseSpec, CollectedPage, Evidence, Outcome, RuntimeConfig
+from .receiver import read_receiver_logs
 from .targets import case_url
 
 
@@ -504,6 +505,14 @@ def _probe_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evidence
     return {k: v for k, v in facts.items() if k != "variant"}, name
 
 
+def _starts_after_run(admin: Evidence, obs: Observation) -> bool:
+    slack = timedelta(seconds=MAX_CLOCK_OFFSET_SECONDS)
+    try:
+        return parse_utc(admin.started_at) >= parse_utc(obs.started_at) - slack
+    except EvidenceUnavailable:
+        return False
+
+
 def _overlaps(admin: Evidence, obs: Observation) -> bool:
     slack = timedelta(seconds=MAX_CLOCK_OFFSET_SECONDS)
     try:
@@ -512,6 +521,40 @@ def _overlaps(admin: Evidence, obs: Observation) -> bool:
     except EvidenceUnavailable:
         return False
     return start <= run_end + slack and end >= run_start - slack
+
+
+def _receiver_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evidence | None,
+                    config: RuntimeConfig, notes: dict):
+    """``receiver_observed`` read by the runner from the receiver logs: (facts, block reason).
+
+    Events are bound to this variant's unguessable run_id and to the trial window:
+    the runner's own window when it acted, else the administrator's record. A
+    missing or unreadable log, or a late, early or foreign event, proves nothing.
+    """
+    if "receiver_observed" not in _required(case, variant):
+        return None, None
+    if obs.actions:
+        start, end = obs.started_at, obs.ended_at
+    elif admin is not None:
+        start, end = admin.started_at, admin.ended_at
+    else:
+        return None, None  # nothing to bind to; the missing admin facts block the case
+    if config.evidence_dir is None:
+        return None, "receiver_log_unavailable"
+    try:
+        events = read_receiver_logs(config.evidence_dir, obs.run_id)
+    except ValueError:
+        return None, "receiver_log_unreadable"
+    if events is None:
+        return None, "receiver_log_unavailable"
+    facts = {"variant": variant}
+    if admin is not None and CLOCK_FACT in admin.facts:
+        facts[CLOCK_FACT] = admin.facts[CLOCK_FACT]
+    observed = receiver_observed(Evidence(obs.run_id, case.id, start, end, facts), events)
+    if observed is None:
+        return None, "receiver_evidence_inconclusive"
+    notes["receiver_events"] = len(events)
+    return {"receiver_observed": observed}, None
 
 
 def _merge(*sources: dict | None):
@@ -547,8 +590,17 @@ def judge(case: CaseSpec, variant: str, obs: Observation, config: RuntimeConfig)
     admin = _admin_evidence(case, variant, obs, config, notes)
     if admin is not None and obs.actions and not _overlaps(admin, obs):
         return finish(Outcome(case.id, variant, "blocked", "evidence_window_mismatch"))
+    if admin is not None and not obs.actions and not _starts_after_run(admin, obs):
+        # Evidence-only: a record whose window predates the run is not this trial's.
+        return finish(Outcome(case.id, variant, "blocked", "evidence_window_mismatch"))
+    receiver, receiver_block = _receiver_facts(case, variant, obs, admin, config, notes)
+    if receiver_block is not None:
+        return finish(Outcome(case.id, variant, "blocked", receiver_block))
+    if receiver:
+        base["observed_facts"].update(receiver)
     probe, probe_name = _probe_facts(case, variant, obs, admin, config, notes)
-    merged, conflict = _merge({"variant": variant}, obs.facts, admin.facts if admin else None, probe)
+    # Runner observations first: an admin value that disagrees is a conflict, never an override.
+    merged, conflict = _merge({"variant": variant}, obs.facts, receiver, admin.facts if admin else None, probe)
     if merged is None:
         return finish(Outcome(case.id, variant, "blocked", "evidence_conflict", {"conflict": conflict}))
     starts, ends = [obs.started_at], [obs.ended_at]

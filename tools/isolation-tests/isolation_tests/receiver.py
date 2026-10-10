@@ -14,6 +14,9 @@ RECEIVER_CASES = frozenset(
     {"NAV-04", "NET-01", "NET-02", "NET-03", "NET-04", "NET-05", "NET-06", "NET-07"}
 )
 RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+# Receiver logs are copied into evidence_dir as receiver-<host>.jsonl.
+LOG_PREFIX = "receiver-"
+LOG_SUFFIX = ".jsonl"
 MAX_LOG_BYTES = 1048576
 _FIELDS = ("at", "case_id", "run_id", "method", "path", "bytes_sent")
 _METHOD = re.compile(r"[A-Z]{3,10}")
@@ -111,4 +114,30 @@ def read_receiver_events(path: Path, run_id: str) -> tuple[dict, ...]:
         event = _validate(json.loads(line, object_pairs_hook=_unique_object))
         if event["run_id"] == run_id:
             events.append(event)
+    return tuple(events)
+
+
+def is_receiver_log(name: str) -> bool:
+    return name.startswith(LOG_PREFIX) and name.endswith(LOG_SUFFIX)
+
+
+def read_receiver_logs(directory: Path, run_id: str) -> tuple[dict, ...] | None:
+    """Events of one run from every ``receiver-*.jsonl`` in ``directory``.
+
+    None when no receiver log exists there (absence of a log proves nothing).
+    Any unreadable or malformed log raises ValueError.
+    """
+    root = Path(directory)
+    try:
+        names = sorted(entry.name for entry in os.scandir(root) if is_receiver_log(entry.name))
+    except OSError:
+        raise ValueError("evidence directory could not be read") from None
+    if not names:
+        return None
+    events = []
+    for name in names:
+        try:
+            events.extend(read_receiver_events(root / name, run_id))
+        except (OSError, RecursionError):
+            raise ValueError("receiver log could not be read") from None
     return tuple(events)

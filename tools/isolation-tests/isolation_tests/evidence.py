@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .model import Evidence
-from .receiver import RUN_ID
+from .receiver import RUN_ID, is_receiver_log
 
 
 MAX_FILE_BYTES = 1048576
@@ -282,8 +282,8 @@ def load_evidence(directory: Path, run_id: str, case_id: str, *, variant: str | 
     matches = []
     try:
         for entry in sorted(os.scandir(root), key=lambda item: item.name):
-            if not entry.name.endswith(".jsonl"):
-                continue
+            if not entry.name.endswith(".jsonl") or is_receiver_log(entry.name):
+                continue  # receiver logs are read by the runner, never as admin records
             for record in _records(root / entry.name):
                 if record.get("run_id") != run_id or record.get("case_id") != case_id:
                     continue
