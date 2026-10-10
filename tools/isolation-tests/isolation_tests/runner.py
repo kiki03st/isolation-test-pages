@@ -32,7 +32,7 @@ from .adapters import ai as ai_adapter
 from .adapters import backend as backend_adapter
 from .adapters import collector as collector_adapter
 from .adapters.collector import PREPARATION_CODES, CollectionError
-from .evaluate import MAX_CONCURRENT_TRIALS, combine, evaluate, merge_analysis, merge_recovery, summarize
+from .evaluate import MAX_CONCURRENT_TRIALS, combine, evaluate, merge_analysis, merge_recovery
 from .evidence import (
     MAX_CLOCK_OFFSET_SECONDS, EvidenceUnavailable, _read_bounded, load_evidence, parse_utc,
     validate_facts,
@@ -643,6 +643,10 @@ def _select(cases: tuple[CaseSpec, ...], arguments) -> tuple[tuple[CaseSpec, ...
     return tuple(c for c in cases if c.risk_level == "basic"), "subset"
 
 
+def _manifest_sha256(manifest: Path) -> str:
+    return hashlib.sha256(Path(manifest).read_bytes()).hexdigest()
+
+
 def _metadata(run_id, started, ended, manifest: Path, cases, config, scope, pages_commit) -> dict:
     try:
         version = json.loads(manifest.read_text(encoding="utf-8")).get("version")
@@ -651,7 +655,7 @@ def _metadata(run_id, started, ended, manifest: Path, cases, config, scope, page
     hashes = {case.id: hashlib.sha256(json.dumps(asdict(case), ensure_ascii=False, sort_keys=True)
                                       .encode("utf-8")).hexdigest() for case in cases}
     return {"run_id": run_id, "started_at": started, "ended_at": ended, "manifest_version": version,
-            "pages_commit": pages_commit, "case_hashes": hashes, "limits": dict(config.limits),
+            "manifest_sha256": _manifest_sha256(manifest), "pages_commit": pages_commit, "case_hashes": hashes, "limits": dict(config.limits),
             "required_ids": sorted(_canonical()), "scope": scope}
 
 
@@ -670,10 +674,10 @@ def _fill_not_run(outcomes: list[Outcome], cases: tuple[CaseSpec, ...]) -> tuple
 
 
 def _write(outcomes, output, metadata, config) -> int:
-    from .report import write_reports
+    from .report import overall, write_reports
 
     json_path, html_path = write_reports(outcomes, output, metadata, secrets=_secrets(config))
-    status, code = summarize(outcomes, frozenset(_canonical()))
+    status, code = overall(outcomes, metadata)
     print(f"overall\t{status}\t{json_path.name}\t{html_path.name}")
     return code
 
@@ -691,8 +695,11 @@ async def _run_all(trials, config, results: list, batch: str) -> None:
 def _run(arguments) -> int:
     from .config import load_config
 
+    from .report import canonical_manifest_sha256
+
     try:
         cases = load_cases(arguments.manifest)
+        canonical = _manifest_sha256(arguments.manifest) == canonical_manifest_sha256()
         config = load_config(arguments.config)
         selected, scope = _select(cases, arguments)
         if arguments.pages_commit is not None and not _COMMIT.fullmatch(arguments.pages_commit):
@@ -710,8 +717,14 @@ def _run(arguments) -> int:
     trials = [(case, variant) for case in selected for variant in case.variants]
     results: list[Outcome] = []
     batch = new_run_id()  # shared by this run's HOST variants; `host-probe --run-id` records it
+    if not canonical and arguments.non_canonical:
+        scope = "non_canonical"  # explicitly declared; never an overall pass
+    elif not canonical:
+        # Edited contracts must not judge anything: every selected trial is refused.
+        results = [Outcome(case.id, variant, "blocked", "manifest_mismatch") for case, variant in trials]
+        trials = []
     if any(case.id in PROBE_CASES for case, _ in trials):
-        print(f"host_batch	{batch}")
+        print(f"host_batch\t{batch}")
     try:
         asyncio.run(_run_all(trials, config, results, batch))
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -738,14 +751,23 @@ def _report(arguments) -> int:
     from .config import load_config
     from .report import load_report
 
+    from .report import canonical_manifest_sha256
+
     try:
         outcomes, metadata = load_report(arguments.input)
         config = load_config(arguments.config) if arguments.config else None
         cases = {case.id: case for case in load_cases(arguments.manifest)}
+        digest = _manifest_sha256(arguments.manifest)
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     if config is not None:
+        canonical = digest == canonical_manifest_sha256()
+        if not canonical:
+            # The re-judging contracts are recorded, so the overall result is capped.
+            metadata = {**metadata, "manifest_sha256": digest}
+            if arguments.non_canonical:
+                metadata["scope"] = "non_canonical"
         rejudged = []
         for item in outcomes:
             case = cases.get(item.case_id)
@@ -753,12 +775,19 @@ def _report(arguments) -> int:
             if case is None or item.variant not in case.variants or data is None:
                 rejudged.append(item)
                 continue
+            if not canonical and not arguments.non_canonical:
+                rejudged.append(Outcome(item.case_id, item.variant, "blocked", "manifest_mismatch"))
+                continue
             try:
                 obs = Observation.from_json(data, case.id, item.variant)
             except (TypeError, ValueError, KeyError):
                 rejudged.append(Outcome(item.case_id, item.variant, "blocked", "observation_unreadable"))
                 continue
-            rejudged.append(judge(case, item.variant, obs, config))
+            try:
+                rejudged.append(judge(case, item.variant, obs, config))
+            except Exception:  # malformed stored data blocks this trial only; no exception text
+                rejudged.append(Outcome(item.case_id, item.variant, "blocked", "rejudge_internal_error",
+                                        {"run_id": obs.run_id}))
         outcomes = tuple(rejudged)
     target = Path(arguments.output) / f"isolation-report-{metadata.get('run_id', 'report')}.json"
     if target.resolve() == Path(arguments.input).resolve():
@@ -846,12 +875,16 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--collector-limit", type=int,
                      help="the remote collector's configured active limit (LIM-06 sends limit+1)")
     run.add_argument("--pages-commit", help="deployed Pages commit to record in the report")
+    run.add_argument("--non-canonical", action="store_true",
+                     help="judge with an edited --manifest; recorded, and never an overall pass")
 
     report = commands.add_parser("report", help="re-render (and re-judge with evidence) a JSON report")
     report.add_argument("--manifest", type=Path, default=CANONICAL_MANIFEST)
     report.add_argument("--input", type=Path, required=True)
     report.add_argument("--output", type=Path, required=True)
     report.add_argument("--config", type=Path, help="re-judge stored observations with evidence_dir")
+    report.add_argument("--non-canonical", action="store_true",
+                        help="re-judge with an edited --manifest; recorded, and never an overall pass")
 
     probe = commands.add_parser(
         "host-probe", help="collect host facts; run by the administrator on the inspected host")

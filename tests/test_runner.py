@@ -1039,3 +1039,104 @@ def test_list_and_host_probe_subcommands_still_work(tmp_path, capsys):
     code = runner.main(["host-probe", "--output", str(output), "--run-id", "r" + "a" * 32])
     assert code in {0, 2}
     assert json.loads(output.read_text(encoding="utf-8"))["schema"] == "host-probe-v1"
+
+
+# --- final review #5: manifest integrity for run and report --config ---------------
+
+def _weakened_manifest(tmp_path):
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    for case in data["cases"]:
+        if case["id"] == "NET-01":
+            for contract in case["expected_observations"]["variants"].values():
+                contract["assertions"]["required_facts"] = {"positive_control_ok": True}
+                contract["required_evidence"] = ["positive_control_ok"]
+            case["required_evidence"] = ["positive_control_ok"]
+    path = tmp_path / "weakened-cases.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_run_with_a_non_canonical_manifest_is_blocked_manifest_mismatch(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+
+    fake = FakeCollector()
+    monkeypatch.setattr(runner, "COLLECT", fake)
+    out = tmp_path / "results"
+    code = runner.main(["run", "--manifest", str(_weakened_manifest(tmp_path)), "--config", str(config_file),
+                        "--output", str(out), "--case", "NET-01"])
+    assert code == 2
+    assert fake.calls == []
+    data = _report(out)
+    items = [i for i in data["items"] if i["case_id"] == "NET-01"]
+    assert items and all((i["status"], i["reason"]) == ("blocked", "manifest_mismatch") for i in items)
+    assert data["summary"]["manifest_canonical"] is False
+
+
+def test_explicit_non_canonical_run_executes_but_cannot_exit_zero(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+    from isolation_tests.report import canonical_manifest_sha256
+
+    fake = FakeCollector()
+    monkeypatch.setattr(runner, "COLLECT", fake)
+    out = tmp_path / "results"
+    code = runner.main(["run", "--manifest", str(_weakened_manifest(tmp_path)), "--config", str(config_file),
+                        "--output", str(out), "--case", "NET-01", "--non-canonical"])
+    assert code != 0 and fake.calls
+    data = _report(out)
+    assert data["metadata"]["scope"] == "non_canonical"
+    assert data["metadata"]["manifest_sha256"] != canonical_manifest_sha256()
+    assert all(i["reason"] != "manifest_mismatch" for i in data["items"])
+
+
+def test_canonical_run_records_the_manifest_hash(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+    from isolation_tests.report import canonical_manifest_sha256
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector())
+    out = tmp_path / "results"
+    runner.main(["run", "--config", str(config_file), "--output", str(out), "--case", "COL-01"])
+    data = _report(out)
+    assert data["metadata"]["manifest_sha256"] == canonical_manifest_sha256()
+    assert data["summary"]["manifest_canonical"] is True
+
+
+def test_report_rejudge_with_a_non_canonical_manifest_is_blocked(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector())
+    first = tmp_path / "first"
+    runner.main(["run", "--config", str(config_file), "--output", str(first), "--case", "NET-01"])
+    source = next(first.glob("isolation-report-*.json"))
+    second = tmp_path / "second"
+    code = runner.main(["report", "--input", str(source), "--config", str(config_file),
+                        "--manifest", str(_weakened_manifest(tmp_path)), "--output", str(second)])
+    assert code == 2
+    data = _report(second)
+    items = [i for i in data["items"] if i["case_id"] == "NET-01"]
+    assert all((i["status"], i["reason"]) == ("blocked", "manifest_mismatch") for i in items)
+    assert data["summary"]["manifest_canonical"] is False
+
+
+def test_report_rejudge_internal_error_is_blocked_per_trial(config_file, tmp_path, monkeypatch):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector())
+    first = tmp_path / "first"
+    runner.main(["run", "--config", str(config_file), "--output", str(first), "--case", "COL-01"])
+    source = next(first.glob("isolation-report-*.json"))
+
+    def broken(*_args, **_kwargs):
+        raise RecursionError("synthetic")
+
+    monkeypatch.setattr(runner, "judge", broken)
+    second = tmp_path / "second"
+    code = runner.main(["report", "--input", str(source), "--config", str(config_file),
+                        "--output", str(second)])
+    assert code == 2
+    item = next(i for i in _report(second)["items"] if i["case_id"] == "COL-01")
+    assert (item["status"], item["reason"]) == ("blocked", "rejudge_internal_error")
+
+
+def test_runner_source_has_no_literal_tab():
+    source = (ROOT / "tools" / "isolation-tests" / "isolation_tests" / "runner.py").read_text(encoding="utf-8")
+    assert chr(9) not in source

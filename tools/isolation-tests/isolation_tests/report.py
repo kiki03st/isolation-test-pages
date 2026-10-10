@@ -6,24 +6,26 @@ header-like keys are removed. The HTML report contains no script, and every
 value, including observed page HTML and error text, is escaped.
 """
 
+import hashlib
 import json
 import os
 import re
 import stat
 import tempfile
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .evaluate import _canonical_variants, summarize
+from .evaluate import CANONICAL_MANIFEST, _canonical_variants, summarize
 from .model import Outcome
 from .receiver import RUN_ID
 
 
 METADATA_KEYS = frozenset({
     "run_id", "started_at", "ended_at", "manifest_version", "pages_commit", "case_hashes",
-    "limits", "required_ids", "scope",
+    "limits", "required_ids", "scope", "manifest_sha256",
 })
 STATUSES = ("passed", "failed", "not_run", "blocked")
 MAX_REPORT_BYTES = 64 * 1048576
@@ -138,13 +140,31 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def _summary(outcomes: tuple[Outcome, ...]) -> dict:
-    required = frozenset(_canonical_variants())
-    status, code = summarize(outcomes, required)
+@lru_cache(maxsize=1)
+def canonical_manifest_sha256() -> str:
+    """sha256 of the packaged canonical cases.json, the only manifest that can pass overall."""
+    return hashlib.sha256(CANONICAL_MANIFEST.read_bytes()).hexdigest()
+
+
+def manifest_canonical(metadata: dict) -> bool:
+    return metadata.get("manifest_sha256") == canonical_manifest_sha256()
+
+
+def overall(outcomes: tuple[Outcome, ...], metadata: dict) -> tuple[str, int]:
+    """Overall status and exit code; a pass judged on any other manifest is capped at blocked/2."""
+    status, code = summarize(tuple(outcomes), frozenset(_canonical_variants()))
+    if code == 0 and not manifest_canonical(metadata):
+        return "blocked", 2
+    return status, code
+
+
+def _summary(outcomes: tuple[Outcome, ...], metadata: dict) -> dict:
+    status, code = overall(outcomes, metadata)
     counts = {name: 0 for name in STATUSES}
     for item in outcomes:
         counts[item.status if item.status in counts else "blocked"] += 1
     return {"status": status, "exit_code": code, "counts": counts,
+            "manifest_canonical": manifest_canonical(metadata),
             "required_variants": sum(len(v) for v in _canonical_variants().values())}
 
 
@@ -201,7 +221,7 @@ def write_reports(outcomes: tuple[Outcome, ...], output: Path, metadata: dict, *
     """Write ``isolation-report-<run_id>.json`` and ``.html`` atomically into ``output``."""
     metadata = _metadata(metadata)
     metadata.setdefault("required_ids", sorted(_canonical_variants()))
-    data = sanitize({"metadata": metadata, "summary": _summary(tuple(outcomes)),
+    data = sanitize({"metadata": metadata, "summary": _summary(tuple(outcomes), metadata),
                      "items": [_item(item) for item in outcomes]}, tuple(secrets))
     directory = _directory(output)
     name = f"isolation-report-{metadata['run_id']}"

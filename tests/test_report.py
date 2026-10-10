@@ -173,3 +173,41 @@ def test_load_report_rejects_malformed_items(tmp_path):
                     encoding="utf-8")
     with pytest.raises(ValueError):
         load_report(path)
+
+
+# --- final review #5: overall exit 0 requires the canonical manifest -------------
+
+def _all_passed():
+    from isolation_tests.evaluate import _canonical_variants
+
+    return tuple(_out(case_id, variant) for case_id, variants in _canonical_variants().items()
+                 for variant in variants)
+
+
+def test_full_pass_with_canonical_manifest_hash_exits_zero(tmp_path):
+    from isolation_tests.report import canonical_manifest_sha256, write_reports
+
+    metadata = {"run_id": "run-test", "manifest_sha256": canonical_manifest_sha256()}
+    json_path, _ = write_reports(_all_passed(), tmp_path, metadata)
+    summary = json.loads(json_path.read_text(encoding="utf-8"))["summary"]
+    assert (summary["status"], summary["exit_code"], summary["manifest_canonical"]) == ("passed", 0, True)
+
+
+@pytest.mark.parametrize("digest", ["0" * 64, None, "not-a-digest"])
+def test_full_pass_without_canonical_manifest_never_exits_zero(tmp_path, digest):
+    from isolation_tests.report import overall, write_reports
+
+    metadata = {"run_id": "run-test"} if digest is None else {"run_id": "run-test", "manifest_sha256": digest}
+    assert overall(_all_passed(), metadata)[1] == 2
+    json_path, _ = write_reports(_all_passed(), tmp_path, metadata)
+    summary = json.loads(json_path.read_text(encoding="utf-8"))["summary"]
+    assert (summary["status"], summary["exit_code"], summary["manifest_canonical"]) == ("blocked", 2, False)
+
+
+def test_canonical_manifest_hash_is_of_the_packaged_cases_json():
+    import hashlib
+
+    from isolation_tests.report import canonical_manifest_sha256
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "isolation-tests" / "cases.json"
+    assert canonical_manifest_sha256() == hashlib.sha256(path.read_bytes()).hexdigest()
