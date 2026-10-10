@@ -127,6 +127,45 @@ def _required(case: CaseSpec, variant: str) -> set[str]:
             | set(contract.get("assertions", {}).get("required_facts", {})))
 
 
+# --- fact producers ----------------------------------------------------------------
+# Facts this code produces itself. Every other required fact comes from an
+# administrator JSONL record; docs/runbook.md section 8 says who produces each
+# one and how (``admin_facts`` lists them, a test keeps the guide complete).
+RUNNER_FACTS = frozenset({
+    "positive_control_ok", "collection", "page_opened", "tls_rejected", "authentication_ok",
+    "authentication_rejected", "concurrency_limit", "limit_plus_one_sent", "limit_exceeded_confirmed",
+    "concurrency_limit_ok", "lookup_fallback_ok", "backend_result_ok", "first_response_deadline_ok",
+    "collector_deadline_s", "deadline_grace_s", "paired_verdict_equal", "receiver_observed",
+})
+AI_FACTS = frozenset({"analysis", "fabricated_evidence_rejected", "fallback_ok", "boundary_offsets",
+                      "boundary_limit", "boundary_results_ok"})
+PROBE_FACTS = frozenset({
+    "environment_names_ok", "platform", "boundary_declared", "unsupported_boundary", "boundary",
+    "positive_control_ok", "uid_ok", "caps_ok", "seccomp_ok", "no_new_privileges_ok", "mounts_ok",
+    "write_probe_applicable", "readonly_ok", "cpu_limit", "memory_limit_mib", "pids_limit", "shm_mib",
+    "tmpfs_mib", "resource_profile_recorded", "resource_limits_ok",
+})
+
+
+def code_facts(case_id: str) -> frozenset[str]:
+    """Facts the runner, the AI adapter or the host probe can produce for this case."""
+    if case_id in PROBE_CASES:
+        return PROBE_FACTS
+    if (case_id, None) in EVIDENCE_ONLY:
+        return frozenset({"receiver_observed"})  # read from the receiver logs
+    return RUNNER_FACTS | AI_FACTS
+
+
+def admin_facts(cases) -> dict[str, list[str]]:
+    """Required facts no code produces: fact name -> ["CASE/variant", ...] (manifest order)."""
+    needed: dict[str, list[str]] = {}
+    for case in cases:
+        for variant in case.variants:
+            for name in sorted(_required(case, variant) - code_facts(case.id)):
+                needed.setdefault(name, []).append(f"{case.id}/{variant}")
+    return dict(sorted(needed.items()))
+
+
 # --- observation -----------------------------------------------------------------
 
 @dataclass

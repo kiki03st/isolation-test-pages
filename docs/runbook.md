@@ -47,7 +47,8 @@
 3. 금지 대상에는 같은 구간에 수신 기록이 없다.
 
 타임아웃, 닫힌 포트, 콘솔·CORS 오류만으로는 차단 통과가 아닙니다. 증거는 run id와 시각으로
-사례에 연결합니다.
+사례에 연결합니다. 3번(수신 기록 없음)은 관리자가 적지 않습니다. 수신 호스트의 기록 파일을
+`evidence_dir/receiver-<호스트>.jsonl`로 복사하면 실행기가 직접 읽어 판정합니다(8-2).
 
 ## 5. 실행 (두 단계)
 
@@ -72,6 +73,7 @@ isolation-tests run --config config.local.json --output results --group collecti
 실행기는 SSH를 하지 않고 EC2를 만들거나 지우지 않습니다. 아래 증거는 관리자가 수집합니다.
 증거 파일 형식은 `tools/isolation-tests/evidence.example.json`(합성 자리표시자)을 따르며,
 승인된 사실 이름과 값만 받습니다. 비밀값, 인스턴스 ID, 파일 내용은 적지 않습니다.
+사실마다 누가, 어떻게 만들고 어떤 run_id·구간에 묶는지는 8절의 표를 따릅니다.
 
 권장 순서:
 
@@ -103,6 +105,10 @@ isolation-tests report --input results/isolation-report-<run_id>.json --output r
 저장된 관측을 `evidence_dir`의 증거와 다시 대조해 판정합니다. `--config`를 생략하면 저장된
 결과를 다시 렌더링만 합니다. 증거가 실행 구간(±1초)과 맞지 않거나 실행기 관측과 충돌하면
 `blocked`입니다.
+
+`--manifest`는 기본값(패키지의 정규 `cases.json`)을 씁니다. 해시가 다른 명세로 `run`이나
+`report --config`를 실행하면 모든 해당 시험이 `blocked manifest_mismatch`입니다.
+`--non-canonical`을 명시하면 실행은 하지만 리포트에 기록되고 전체 결과는 0이 될 수 없습니다.
 
 ## 6. 결과 읽기
 
@@ -170,3 +176,128 @@ isolation-tests report --input results/isolation-report-<run_id>.json --output r
 - 저장소 소유자는 개인 User 계정이어야 합니다(조직 불가). 조직 저장소 원격을 재사용하지 않습니다.
 - 게시 주소는 실제 게시가 끝난 뒤에 README에 적습니다.
 - 가드는 값 자체를 출력하지 않고 통과/거부 상태만 출력합니다.
+
+## 8. 증거 생산 안내
+
+아래 표는 `cases.json`의 필수 사실 중 코드(실행기·AI 어댑터·`host-probe`)가 만들지 않는
+사실 전부입니다. 목록은 `isolation_tests.runner.admin_facts()`로 생성하며, 시험
+(`tests/test_runbook_guide.py`)이 표에 빠진 사실이 없는지 확인합니다. 사례 정의가 바뀌면
+표를 다시 생성합니다.
+
+코드가 직접 만드는 사실(관리자가 적지 않음):
+
+- 실행기: `positive_control_ok`(행동하는 사례의 COL-01 대조), `collection`, `page_opened`,
+  `tls_rejected`, `authentication_ok`, `authentication_rejected`, `concurrency_limit`,
+  `limit_plus_one_sent`, `limit_exceeded_confirmed`, `concurrency_limit_ok`, `lookup_fallback_ok`,
+  `backend_result_ok`, `first_response_deadline_ok`, `collector_deadline_s`, `deadline_grace_s`,
+  `paired_verdict_equal`, `receiver_observed`(수신 기록에서 읽음)
+- AI 어댑터: `analysis`, `fabricated_evidence_rejected`, `fallback_ok`, `boundary_offsets`,
+  `boundary_limit`, `boundary_results_ok`
+- `host-probe`(HOST-01/02/03): 프로세스·마운트·읽기 전용·자원 프로필 사실
+
+관리자가 적은 값이 코드의 관측과 다르면 `evidence_conflict`(blocked)입니다. 관리자 값이
+코드 관측을 덮어쓰지 못합니다.
+
+### 8-1. 기록 형식과 결합
+
+증거는 `evidence_dir` 안의 `*.jsonl` 파일에 한 줄당 한 기록으로 적습니다. 형식은
+`tools/isolation-tests/evidence.example.json`과 같습니다.
+
+```
+{"run_id": "<리포트 items[].details.run_id>", "case_id": "NET-01", "started_at": "<UTC>", "ended_at": "<UTC>", "facts": {"variant": "img", ...}, "references": []}
+```
+
+- run_id: (사례, 변형)마다 따로 발급되는 값입니다. `run` 리포트의 `items[].details.run_id`를
+  그대로 씁니다. 다른 변형·다른 실행의 run_id로 적은 기록은 무시됩니다.
+- variant: `facts.variant`는 그 변형 이름과 정확히 같아야 합니다.
+- 시각: ISO 8601 UTC(`Z` 또는 `+00:00`). 호스트 간 시계 차이가 1초를 넘으면
+  `clock_offset_seconds`를 적고, 1초를 넘는 값은 blocked입니다.
+- 구간(실행기가 행동한 사례): 관리자 구간이 리포트의 `details.started_at`~`details.ended_at`과
+  ±1초 안에서 겹쳐야 합니다.
+- 구간(증거 전용 사례: NET-05, HOST, INT-02, REC-01): 관리자 구간의 시작이 그 시험의
+  `details.started_at`보다 1초 넘게 앞서면 안 됩니다(실행 전 기록 재사용 방지).
+- 값: 승인된 이름과 정확한 타입만 받습니다(`true` 대신 `1`·`"true"` 불가). 목록 사실은 표의
+  허용 항목만 받습니다. 비밀값·인스턴스 ID·파일 내용은 적지 않습니다.
+- `fixture_max_active`(LIM-06): 표본 서버의 동시 처리 상한(1~4)을 적습니다. 상한+1이 이
+  값보다 크면 표본 부하가 부족해 blocked입니다.
+
+### 8-2. 실행기가 읽는 파일
+
+- 수신 기록: 수신 호스트의 표본 서버(`--log`)가 쓴 JSONL을 `evidence_dir/receiver-<호스트>.jsonl`로
+  복사합니다. `receiver_observed`가 필요한 사례(NAV-04, NET-01~07)는 실행기가 이 파일을 직접
+  읽어 그 변형의 run_id와 시험 구간(±1초)에 묶습니다. 파일이 없으면 `receiver_log_unavailable`,
+  형식이 틀리면 `receiver_log_unreadable`, 구간 밖·다른 사례의 기록이 있으면
+  `receiver_evidence_inconclusive`(모두 blocked)입니다. 기록 파일이 가득 차면(1 MiB) 새
+  파일로 바꿉니다.
+- host probe: `host-probe --run-id <host_batch>` 출력(`host-probe-v1`)을 `evidence_dir`에 복사합니다.
+- REC-01 후속 실행: 교체 뒤 새로 실행한 `run`의 리포트를 원래 이름
+  (`isolation-report-<run_id>.json`) 그대로 `evidence_dir`에 복사하고, 그 run_id를
+  `followup_run_id`에 적습니다. 실행기는 리포트가 있는지, run_id가 같은지, 정규 명세로
+  실행됐는지, 교체 기록 구간 시작과 원래 시험 이후에 시작했는지, COL-01·INT-01·HOST-01·
+  HOST-02·HOST-03의 모든 변형이 통과했는지 확인합니다. 하나라도 아니면 blocked입니다.
+- LIM-06: 실행기는 상한+1 결과를 직접 판정합니다. 모두 수집되면 `concurrency_limit_ok=false`,
+  과부하 응답(`collector_unavailable`, `collector_busy`, `concurrency_limit_exceeded`,
+  `queue_full`)이 있고 수집 건수가 상한 이하이면 true입니다.
+
+### 8-3. 관리자 기록이 필요한 사실
+
+생산자 설명: "수집기 작업 로그"는 수집기 서버의 해당 run_id 작업 기록, "격리 컨테이너
+브라우저 관찰"은 같은 작업의 브라우저 이벤트 기록, "대상 호스트·컨테이너 관리자"는 SSH로
+대상 경계에서 직접 확인한 값, "담당자"는 사람이 직접 확인한 기록(`evidence_source: "observed"`)입니다.
+
+| 사실 | 사례 (변형) | 생산자 | 확인 방법 | 값 |
+| --- | --- | --- | --- | --- |
+| `actual_byte_limit_ok` | LIM-03 (large length-small length-large gzip) | 수집기 작업 로그 | 실제로 읽은 응답 바이트가 8 MiB 상한 안에서 끊겼는지(Content-Length 주장과 무관) | bool |
+| `callback_failure_observed` | INT-04 (callback-failure) | 담당자 | 카카오 콜백 전송 실패를 BE 로그에서 확인 | bool |
+| `children_remaining` | LIM-01 (delay-15s), LIM-02 (slow-stream), LIM-03 (large length-small length-large gzip), LIM-05 (dom-growth cpu-bursts), LIM-06 (concurrency), HOST-03 (process-cleanup) | 대상 호스트·컨테이너 관리자 | 작업 종료 후 수집 작업의 자식 프로세스 수(`ps --ppid`) | 0 이상 정수 |
+| `collector_deadline_ok` | INT-03 (pipeline) | 수집기 작업 로그 | BE→수집 요청이 12초 마감 안에 끝났는지 | bool |
+| `concurrency_limit_known` | LIM-06 (concurrency) | 대상 호스트·컨테이너 관리자 | 수집기 운영 동시 처리 상한 설정을 확인했는지(`--collector-limit`과 같은 값) | bool |
+| `context_cleanup_ok` | HOST-03 (context-cleanup) | 대상 호스트·컨테이너 관리자 | 작업 후 브라우저 컨텍스트·프로필 디렉터리가 지워졌는지 | bool |
+| `context_fresh` | SES-01 (read) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | SES-01 read 시험이 새 컨텍스트에서 시작했는지 | bool |
+| `credentials_rotated` | REC-01 (replacement) | 대상 호스트·컨테이너 관리자 | 교체된 새 EC2에 새 인증정보가 발급됐는지 | bool |
+| `deadline_met` | LIM-01 (delay-15s), LIM-02 (slow-stream), LIM-05 (dom-growth cpu-bursts) | 수집기 작업 로그 | 원격 작업이 마감(12초)+여유(1초) 안에 종료됐는지 | bool |
+| `digest_ok` | HOST-03 (digest), REC-01 (replacement) | 대상 호스트·컨테이너 관리자 | 실행 중 이미지 digest가 승인값과 같은지(HOST-03 digest는 observed/approved_digest* 함께) | bool |
+| `disabled_readonly_ok` | COL-02 (default) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | disabled·readonly 입력이 수집 결과에 그 상태로 남았는지 | bool |
+| `download_attempt_observed` | DL-02 (attachment) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | attachment 응답에 다운로드 시도가 실제로 있었는지 | bool |
+| `download_clicked` | ANA-04 (default), DL-01 (default) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 다운로드 링크를 클릭했는지(기대값 false) | bool |
+| `download_link_recorded` | DL-01 (default) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | sample.apk 링크가 결과에 기록됐는지 | bool |
+| `download_remaining_bytes` | DL-02 (attachment) | 대상 호스트·컨테이너 관리자 | 프로세스 종료 뒤 남은 다운로드 바이트 | 0 이상 정수 |
+| `download_temporary_bytes` | DL-02 (attachment) | 대상 호스트·컨테이너 관리자 | 작업 중 임시 영역에 저장된 다운로드 바이트 | 0 이상 정수 |
+| `false_success_reported` | INT-04 (callback-failure) | 담당자 | 콜백 실패에도 사용자에게 성공으로 보였는지(기대값 false) | bool |
+| `file_executed` | ANA-04 (default), DL-01 (default), DL-02 (attachment) | 대상 호스트·컨테이너 관리자 | 내려받은 파일이 실행됐는지(기대값 false) | bool |
+| `firewall_drop_observed` | NET-05 (tcp dns ipv6), INT-02 (denied-source) | 대상 호스트·컨테이너 관리자 | 격리 컨테이너 경계의 방화벽 drop 카운터·로그 증가 | bool |
+| `form_associations_ok` | COL-02 (default) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | label/aria/fieldset/폼 밖 입력의 연결이 결과에 보존됐는지 | bool |
+| `form_destination_ok` | NET-02 (action formaction) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | action/formaction 목적지가 기록만 되고 이동하지 않았는지 | bool |
+| `forms_submitted` | COL-03 (default), NET-02 (action formaction) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 어떤 폼이라도 제출됐는지(기대값 false) | bool |
+| `http_page_state` | HTTP-01 (403 404 500 block-page captcha-page) | 수집기 작업 로그 | HTTP-01 변형의 페이지 상태 분류 | 403|404|500|block_page|captcha_page |
+| `initial_url_rejected` | NET-07 (initial-private scheme userinfo normalized-host) | 수집기 작업 로그 | 최초 입력 URL이 방문 전에 거부됐는지(실패 코드와 별도로 기록) | bool |
+| `inspected_regions` | COL-04 (delayed), COL-05 (iframe open-shadow) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 실제 검사한 영역 이름 목록 | 영역 이름 목록 |
+| `kakao_received` | INT-03 (kakao-receipt) | 담당자 | 실제 카카오 수신을 담당자가 확인(evidence_source=observed) | bool |
+| `navigation_chain_ok` | NAV-01 (js meta), NAV-02 (hops-1 hops-5) | 수집기 작업 로그 | 이동 체인의 각 홉이 허용 표본 서버 안에 있었는지 | bool |
+| `navigation_kind` | NAV-01 (js meta) | 수집기 작업 로그 | NAV-01 이동 종류 | js|meta |
+| `old_credentials_rejected` | REC-01 (replacement) | 대상 호스트·컨테이너 관리자 | 이전 인증정보가 거부되는지 시험한 결과 | bool |
+| `payment_amount_krw` | ANA-05 (default) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 페이지에서 관찰한 결제 요청 금액 | 숫자 |
+| `payment_request_observed` | ANA-05 (default) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 결제 요청 문구·폼을 관찰했는지 | bool |
+| `positive_control_ok` | NET-05 (tcp dns ipv6), INT-02 (allowed-source denied-source), REC-01 (replacement) | 대상 호스트·컨테이너 관리자 | 증거 전용 사례에서 같은 경계·구간의 정상 접속 대조가 성공했는지 | bool |
+| `probe_in_container` | NET-05 (tcp dns ipv6) | 대상 호스트·컨테이너 관리자 | 직접 연결 시도를 격리 컨테이너 안에서 했는지 | bool |
+| `queue_limit_ok` | LIM-06 (concurrency) | 수집기 작업 로그 | 앱 대기열 없이 초과 요청이 즉시 거절됐는지 | bool |
+| `receiver_control_ok` | NAV-04 (http js), NET-01 (img script iframe fetch), NET-02 (action formaction), NET-03 (loopback private link-local main-public isolation-public), NET-04 (shared-ip-host same-host-path), NET-05 (tcp dns ipv6), NET-06 (websocket worker service-worker), NET-07 (initial-private scheme userinfo normalized-host) | 수신 호스트 관리자 | 같은 구간에 관리자가 보낸 대조 요청이 수신 기록에 남았는지 | bool |
+| `recovery_ok` | LIM-01 (delay-15s), LIM-02 (slow-stream), LIM-03 (large length-small length-large gzip), LIM-05 (dom-growth cpu-bursts), LIM-06 (concurrency), REC-01 (replacement) | 수집기 작업 로그 | 제한 시험 직후 다음 정상 요청이 성공했는지(실행기 COL-01 재요청과 별도 기록) | bool |
+| `redirect_limit_ok` | NAV-03 (hops-6 loop) | 수집기 작업 로그 | 6번째 홉·반복 경로에서 이동이 멈췄는지 | bool |
+| `relative_targets_ok` | COL-03 (default) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 상대 링크·base·action·formaction이 올바른 절대 주소로 기록됐는지 | bool |
+| `remote_job_terminated` | DL-02 (attachment), LIM-01 (delay-15s), LIM-02 (slow-stream), LIM-03 (large length-small length-large gzip), LIM-05 (dom-growth cpu-bursts), LIM-06 (concurrency), HOST-03 (process-cleanup) | 대상 호스트·컨테이너 관리자 | 실행기 시간 초과와 별도로 원격 수집 작업이 실제로 끝났는지 | bool |
+| `replacement_ok` | REC-01 (replacement) | 대상 호스트·컨테이너 관리자 | 새 EC2 생성으로 교체했는지(replacement_kind=new_instance) | bool |
+| `request_blocked` | NAV-04 (http js), NET-01 (img script iframe fetch), NET-03 (loopback private link-local main-public isolation-public), NET-04 (shared-ip-host same-host-path), NET-05 (tcp dns ipv6), NET-06 (websocket worker service-worker), NET-07 (initial-private scheme userinfo normalized-host) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 금지 대상 요청이 격리 정책에 의해 차단됐는지(차단 기록) | bool |
+| `resource_limits_ok` | LIM-05 (dom-growth cpu-bursts) | 대상 호스트·컨테이너 관리자 | LIM-05 동안 CPU·메모리·PIDs가 기준 프로필 안이었는지 | bool |
+| `resource_profile_recorded` | LIM-05 (dom-growth cpu-bursts) | 대상 호스트·컨테이너 관리자 | LIM-05 시점의 자원 프로필을 기록했는지(host-probe 값 사용 가능) | bool |
+| `safe_claimed` | HTTP-01 (403 404 500 block-page captcha-page), HTTP-02 (wrong-mime invalid-utf8 truncated) | 수집기 작업 로그 | 오류·차단 페이지를 안전하다고 판정했는지(기대값 false) | bool |
+| `same_host_verified` | NET-04 (same-host-path) | 대상 호스트·컨테이너 관리자 | 같은 호스트의 다른 경로 대상임을 확인했는지 | bool |
+| `sandbox_ok` | HOST-01 (sandbox) | 대상 호스트·컨테이너 관리자 | Chromium 샌드박스 활성 관찰(evidence_source=observed) | bool |
+| `service_worker_registered` | NET-06 (service-worker) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | service worker가 등록됐는지(기대값 false) | bool |
+| `session_markers_present` | SES-01 (read) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | read 시 남아 있던 저장소 표식 | cookie|local_storage|indexed_db|session_storage 목록 |
+| `session_stores_seeded` | SES-01 (seed) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | seed 시 표식을 쓴 저장소 | cookie|local_storage|indexed_db|session_storage 목록 |
+| `shared_ip_verified` | NET-04 (shared-ip-host) | 대상 호스트·컨테이너 관리자 | 같은 IP의 다른 호스트 대상임을 확인했는지 | bool |
+| `source_allowed` | INT-02 (allowed-source) | 대상 호스트·컨테이너 관리자 | 허용 출발지 요청이 수락됐는지 | bool |
+| `source_denied` | INT-02 (denied-source) | 대상 호스트·컨테이너 관리자 | 비허용 출발지 요청이 거부됐는지 | bool |
+| `stream_bounds_ok` | LIM-02 (slow-stream) | 수집기 작업 로그 | 느린 스트림이 20초 수명 안에서 끊겼는지 | bool |
+| `unknown_regions` | COL-05 (closed-shadow) | 격리 컨테이너 브라우저 관찰(수집기 작업 기록) | 검사하지 못한 영역 이름 목록(closed shadow 등) | 영역 이름 목록 |
