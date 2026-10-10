@@ -47,6 +47,7 @@ def write_manifest(tmp_path):
 def pytest_configure(config):
     config.addinivalue_line("markers", "browser: optional local Chromium page tests")
     config.addinivalue_line("markers", "timing: explicit real-time fixture checks")
+    config.addinivalue_line("markers", "live: needs a real configured environment")
 
 
 @pytest.fixture
