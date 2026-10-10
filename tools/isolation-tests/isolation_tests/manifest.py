@@ -1,13 +1,13 @@
 """Load versioned JSON manifests without coercing case field types."""
 
 import json
-import math
 import re
 from dataclasses import fields
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+from .evidence import APPROVED_FACTS, EvidenceUnavailable, check_fact
 from .model import CaseSpec
 
 
@@ -22,16 +22,6 @@ _VARIANT = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 _INPUTS = {"message", "token_mode", "domain_match", "page_state", "observation_status", "metric", "boundary_offset", "target_key"}
 _ASSERTIONS = {"required_text", "forbidden_text", "title", "final_path", "status_code", "content_type", "redirect_count", "max_redirects", "required_facts", "unknown_regions", "failure_codes"}
 _ANALYSIS = {"required_doubts", "required_signal_codes", "forbidden_signal_codes", "final_state", "reason_code", "mode"}
-_BOOLEAN_FACTS = {
-    "positive_control_ok", "receiver_control_ok", "request_blocked", "receiver_observed",
-    "firewall_drop_observed", "remote_job_terminated", "recovery_ok", "caps_ok",
-    "sandbox_ok", "readonly_ok", "mounts_ok", "environment_names_ok", "digest_ok",
-    "replacement_ok", "kakao_received", "collection", "analysis", "no_new_privileges_ok",
-    "callback_failure_observed", "lookup_fallback_ok",
-}
-_COUNT_FACTS = {"children_remaining", "download_temporary_bytes", "download_remaining_bytes"}
-
-
 def _strings(value: Any, name: str, *, names: bool = False) -> None:
     if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
         raise ValueError(f"{name} must be an array of nonempty strings")
@@ -52,21 +42,19 @@ def _relative_path(value: str, name: str) -> None:
 
 
 def _facts(value: Any) -> None:
-    if not isinstance(value, dict) or any(not _NAME.fullmatch(key) for key in value):
+    """Expected values follow the one approved vocabulary in evidence.py (names and types)."""
+    if not isinstance(value, dict) or any(not isinstance(key, str) or not _NAME.fullmatch(key) for key in value):
         raise ValueError("required_facts must map safe fact names to scalar expectations")
     for key, expected in value.items():
-        if key in _BOOLEAN_FACTS and type(expected) is not bool:
-            raise ValueError(f"fact {key} must be a boolean")
-        if key in _COUNT_FACTS and (type(expected) is not int or expected < 0):
-            raise ValueError(f"fact {key} must be a nonnegative integer")
-        if key in {"inspected_regions", "unknown_regions"}:
-            _strings(expected, key, names=True)
-        items = expected if isinstance(expected, list) else [expected]
-        for item in items:
-            if item is not None and type(item) not in {str, bool, int, float}:
-                raise ValueError("required_facts permits only scalars or flat scalar arrays")
-            if type(item) is float and not math.isfinite(item):
-                raise ValueError("required_facts numbers must be finite")
+        try:
+            check_fact(key, expected)
+        except EvidenceUnavailable as error:
+            raise ValueError(f"required_facts: {error}") from None
+
+
+def _fact_names(value: list, name: str) -> None:
+    if set(value) - APPROVED_FACTS:
+        raise ValueError(f"{name} names a fact outside the approved vocabulary")
 
 
 def _expectations(data: dict, variants: list[str], *, analysis: bool) -> None:
@@ -91,6 +79,7 @@ def _expectations(data: dict, variants: list[str], *, analysis: bool) -> None:
             raise ValueError("observation variant requires exactly the documented fields")
         for key in ("required_evidence", "required_capabilities"):
             _strings(contract[key], key, names=True)
+        _fact_names(contract["required_evidence"], "required_evidence")
         inputs, assertions = contract["inputs"], contract["assertions"]
         if not isinstance(inputs, dict) or set(inputs) - _INPUTS:
             raise ValueError("inputs contains unsupported fields")
@@ -145,6 +134,7 @@ def _load_case(data: Any) -> CaseSpec:
         raise ValueError("case field max_requests must be a positive integer")
     for key in ("required_capabilities", "required_evidence"):
         _strings(data[key], key, names=True)
+    _fact_names(data["required_evidence"], "required_evidence")
     _strings(data["variants"], "variants")
     if not data["variants"] or any(not _VARIANT.fullmatch(item) for item in data["variants"]):
         raise ValueError("variants require nonempty safe names")

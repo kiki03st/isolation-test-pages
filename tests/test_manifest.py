@@ -506,7 +506,8 @@ def test_task2_known_fact_types_preserve_evaluator_contract(task2_variant_case_d
 def test_task2_fact_values_round_trip_with_exact_types(task2_variant_case_data, write_manifest):
     from isolation_tests.manifest import load_cases
 
-    facts = {"positive_control_ok": True, "children_remaining": 0, "unknown_regions": ["closed_shadow"], "extra_fact": [None, "synthetic", 3, 0.5, False]}
+    facts = {"positive_control_ok": True, "children_remaining": 0, "unknown_regions": ["closed_shadow"],
+             "boundary_offsets": [-1, 0, 1], "clock_offset_seconds": 0.5, "navigation_kind": "js"}
     task2_variant_case_data["expected_observations"]["variants"]["default"]["assertions"]["required_facts"] = facts
     case = load_cases(write_manifest({"version": 1, "cases": [task2_variant_case_data]}))[0]
     assert case.expected_observations["variants"]["default"]["assertions"]["required_facts"] == facts
@@ -548,3 +549,36 @@ def test_task2_no_new_privileges_fact_preserves_actual_booleans(task2_variant_ca
     facts["no_new_privileges_ok"] = value
     case = load_cases(write_manifest({"version": 1, "cases": [task2_variant_case_data]}))[0]
     assert case.expected_observations["variants"]["default"]["assertions"]["required_facts"]["no_new_privileges_ok"] is value
+
+
+# --- final review: one fact vocabulary (evidence.py) for the manifest too -----------
+
+@pytest.mark.parametrize("facts", [
+    {"extra_fact": True}, {"positive_control_okk": True}, {"navigation_kind": "redirect"},
+    {"boundary_offsets": [-1, 0, 2]}, {"session_stores_seeded": ["free text"]},
+    {"payment_amount_krw": "1000"},
+])
+def test_required_facts_outside_the_approved_vocabulary_are_rejected(task2_variant_case_data, write_manifest, facts):
+    from isolation_tests.manifest import load_cases
+
+    task2_variant_case_data["expected_observations"]["variants"]["default"]["assertions"]["required_facts"] = facts
+    with pytest.raises(ValueError):
+        load_cases(write_manifest({"version": 1, "cases": [task2_variant_case_data]}))
+
+
+@pytest.mark.parametrize("location", ["case", "variant"])
+def test_required_evidence_names_must_be_approved_facts(task2_variant_case_data, write_manifest, location):
+    from isolation_tests.manifest import load_cases
+
+    if location == "case":
+        task2_variant_case_data["required_evidence"] = ["collection", "colection"]
+    else:
+        task2_variant_case_data["expected_observations"]["variants"]["default"]["required_evidence"] = ["colection"]
+    with pytest.raises(ValueError):
+        load_cases(write_manifest({"version": 1, "cases": [task2_variant_case_data]}))
+
+
+def test_manifest_keeps_no_second_fact_vocabulary():
+    from isolation_tests import manifest
+
+    assert not hasattr(manifest, "_BOOLEAN_FACTS") and not hasattr(manifest, "_COUNT_FACTS")

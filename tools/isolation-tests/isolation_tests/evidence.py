@@ -64,12 +64,20 @@ NUMBER_FACTS = frozenset({
     "deadline_grace_s", "boundary_limit", "payment_amount_krw", "cpu_limit",
     "memory_limit_mib", "pids_limit", "shm_mib", "tmpfs_mib",
 })
-# Flat scalar arrays (not regions).
-LIST_FACTS = frozenset({"boundary_offsets", "session_stores_seeded", "session_markers_present"})
+# Flat arrays (not regions). Every item must be one approved value, so no list
+# can carry free text: an unlisted item rejects the whole record.
+_STORES = frozenset({"cookie", "local_storage", "indexed_db", "session_storage"})
+LIST_ITEMS = {
+    "boundary_offsets": frozenset({-1, 0, 1}),
+    "session_stores_seeded": _STORES,
+    "session_markers_present": _STORES,
+}
+LIST_FACTS = frozenset(LIST_ITEMS)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _DIGEST_KIND = re.compile(r"(image_manifest|image_index|image_config|container_id)\Z")
 _PLATFORM_ID = re.compile(r"[a-z0-9]+/[a-z0-9]+(?:/[a-z0-9]+)?\Z")
-# Strings are restricted by pattern so a pasted secret cannot fit.
+# Strings are restricted by pattern (lists by LIST_ITEMS, regions by a strict
+# name token), so a pasted secret cannot fit in any approved fact.
 TEXT_FACTS = {
     "variant": _VARIANT,
     "boundary": re.compile(r"(host|container)\Z"),
@@ -96,6 +104,45 @@ def _is_number(value: Any) -> bool:
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def _approved_item(item: Any, allowed: frozenset) -> bool:
+    # Exact type: True == 1 and 1.0 == 1 in Python, neither is an approved offset.
+    return any(type(item) is type(value) and item == value for value in allowed)
+
+
+def check_fact(key: Any, value: Any) -> None:
+    """Raise EvidenceUnavailable unless ``key`` is approved and ``value`` has its exact type.
+
+    The one authority for fact names and value rules: administrator evidence,
+    runner facts and the manifest's expected values are all checked here.
+    """
+    if not isinstance(key, str) or not _NAME.fullmatch(key):
+        raise EvidenceUnavailable("fact name is unsafe")
+    if key not in APPROVED_FACTS:
+        raise EvidenceUnavailable("fact name is not in the approved vocabulary")
+    if key in TEXT_FACTS and not (isinstance(value, str) and TEXT_FACTS[key].fullmatch(value)):
+        raise EvidenceUnavailable(f"fact {key} has an unapproved value")
+    if key in LIST_FACTS and (
+            not isinstance(value, list) or len(set(map(repr, value))) != len(value)
+            or any(not _approved_item(item, LIST_ITEMS[key]) for item in value)):
+        raise EvidenceUnavailable(f"fact {key} must list unique approved items")
+    if key in BOOLEAN_FACTS and type(value) is not bool:
+        raise EvidenceUnavailable(f"fact {key} must be a boolean")
+    if key in COUNT_FACTS and (type(value) is not int or value < 0):
+        raise EvidenceUnavailable(f"fact {key} must be a nonnegative integer")
+    if key in REGION_FACTS and (
+            not isinstance(value, list) or len(set(map(repr, value))) != len(value)
+            or any(not isinstance(item, str) or not _NAME.fullmatch(item) for item in value)):
+        raise EvidenceUnavailable(f"fact {key} must list unique region names")
+    if key in NUMBER_FACTS and not _is_number(value):
+        raise EvidenceUnavailable(f"fact {key} must be a finite number")
+    items = value if isinstance(value, list) else [value]
+    for item in items:
+        if item is not None and type(item) not in (str, bool, int, float):
+            raise EvidenceUnavailable("facts permit only scalars or flat scalar arrays")
+        if type(item) is float and not math.isfinite(item):
+            raise EvidenceUnavailable("fact numbers must be finite")
+
+
 def validate_facts(facts: Any) -> dict:
     """Return ``facts`` if every value is well typed, else raise EvidenceUnavailable."""
     if not isinstance(facts, dict):
@@ -104,30 +151,7 @@ def validate_facts(facts: Any) -> dict:
     if not isinstance(variant, str) or not _VARIANT.fullmatch(variant):
         raise EvidenceUnavailable("facts.variant is missing or unsafe")
     for key, value in facts.items():
-        if not isinstance(key, str) or not _NAME.fullmatch(key):
-            raise EvidenceUnavailable("fact name is unsafe")
-        items = value if isinstance(value, list) else [value]
-        for item in items:
-            if item is not None and type(item) not in (str, bool, int, float):
-                raise EvidenceUnavailable("facts permit only scalars or flat scalar arrays")
-            if type(item) is float and not math.isfinite(item):
-                raise EvidenceUnavailable("fact numbers must be finite")
-        if key not in APPROVED_FACTS:
-            raise EvidenceUnavailable("fact name is not in the approved vocabulary")
-        if key in TEXT_FACTS and not (isinstance(value, str) and TEXT_FACTS[key].fullmatch(value)):
-            raise EvidenceUnavailable(f"fact {key} has an unapproved value")
-        if key in LIST_FACTS and not isinstance(value, list):
-            raise EvidenceUnavailable(f"fact {key} must be a list")
-        if key in BOOLEAN_FACTS and type(value) is not bool:
-            raise EvidenceUnavailable(f"fact {key} must be a boolean")
-        if key in COUNT_FACTS and (type(value) is not int or value < 0):
-            raise EvidenceUnavailable(f"fact {key} must be a nonnegative integer")
-        if key in REGION_FACTS and (
-                not isinstance(value, list) or len(set(map(repr, value))) != len(value)
-                or any(not isinstance(item, str) or not _NAME.fullmatch(item) for item in value)):
-            raise EvidenceUnavailable(f"fact {key} must list unique region names")
-        if key in NUMBER_FACTS and not _is_number(value):
-            raise EvidenceUnavailable(f"fact {key} must be a finite number")
+        check_fact(key, value)
     return facts
 
 

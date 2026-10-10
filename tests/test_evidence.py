@@ -26,16 +26,11 @@ def _write(directory, *records):
 
 
 def _assert_untrusted(directory, *, run_id="run-test", case_id="NET-01"):
-    from isolation_tests.evidence import load_evidence
+    from isolation_tests.evidence import EvidenceUnavailable, load_evidence
 
-    # The interface does not prescribe exception versus empty evidence for a
-    # rejected input. Either is safe; accepting the positive facts is not.
-    try:
-        evidence = load_evidence(directory, run_id, case_id)
-    except (ValueError, OSError):
-        return
-    assert evidence.facts.get("positive_control_ok") is not True
-    assert evidence.facts.get("request_blocked") is not True
+    # The contract: a rejected input raises EvidenceUnavailable; it never yields facts.
+    with pytest.raises(EvidenceUnavailable):
+        load_evidence(directory, run_id, case_id)
 
 
 def test_load_preserves_exact_identity_window_variant_and_actual_facts(tmp_path):
@@ -90,12 +85,11 @@ def test_explicit_variant_selects_exact_matching_rows(tmp_path):
 def test_explicit_variant_cannot_use_a_different_variant(tmp_path):
     from isolation_tests.evidence import load_evidence
 
+    from isolation_tests.evidence import EvidenceUnavailable
+
     _write(tmp_path, _record())
-    try:
-        result = load_evidence(tmp_path, "run-test", "NET-01", variant="img")
-    except (ValueError, OSError):
-        return
-    assert result.facts.get("request_blocked") is not True
+    with pytest.raises(EvidenceUnavailable):
+        load_evidence(tmp_path, "run-test", "NET-01", variant="img")
 
 
 def test_three_argument_loader_rejects_ambiguous_variants(tmp_path):
@@ -263,3 +257,45 @@ def test_unapproved_fact_names_and_host_fact_types_are_rejected():
                 {"seccomp_ok": "true"}, {"memory_limit_mib": True}, {"evidence_source": "me"}):
         with pytest.raises(EvidenceUnavailable):
             validate_facts({"variant": "fetch", **bad})
+
+
+# --- final review #7: list facts carry only approved items ----------------------
+
+@pytest.mark.parametrize("key,value", [
+    ("session_stores_seeded", ["cookie", "Bearer synthetic-pasted-credential"]),
+    ("session_stores_seeded", ["sk-synthetic-secret-value"]),
+    ("session_stores_seeded", ["cookie", "cookie"]),
+    ("session_stores_seeded", [True]),
+    ("session_markers_present", ["password=synthetic"]),
+    ("session_markers_present", ["Cookie"]),
+    ("session_markers_present", [1]),
+    ("boundary_offsets", [-1, 0, 2]),
+    ("boundary_offsets", ["-1", "0", "1"]),
+    ("boundary_offsets", [-1, 0, 0]),
+    ("boundary_offsets", [True, 0, 1]),
+    ("boundary_offsets", [-1.0, 0, 1]),
+])
+def test_list_facts_reject_free_text_and_unapproved_items(key, value):
+    from isolation_tests.evidence import EvidenceUnavailable, validate_facts
+
+    with pytest.raises(EvidenceUnavailable):
+        validate_facts({"variant": "x", key: value})
+
+
+@pytest.mark.parametrize("key,value", [
+    ("session_stores_seeded", ["cookie", "local_storage", "indexed_db"]),
+    ("session_stores_seeded", ["session_storage"]),
+    ("session_markers_present", []),
+    ("session_markers_present", ["cookie"]),
+    ("boundary_offsets", [-1, 0, 1]),
+])
+def test_list_facts_accept_approved_items(key, value):
+    from isolation_tests.evidence import validate_facts
+
+    assert validate_facts({"variant": "x", key: value})[key] == value
+
+
+def test_every_list_fact_has_an_item_rule():
+    from isolation_tests import evidence
+
+    assert set(evidence.LIST_ITEMS) == set(evidence.LIST_FACTS)
