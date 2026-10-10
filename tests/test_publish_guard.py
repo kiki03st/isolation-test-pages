@@ -216,3 +216,18 @@ def test_non_object_user_json_is_a_refusal(monkeypatch, capsys):
     monkeypatch.setattr(guard, "_run", lambda command, cwd=None: "[1, 2]")
     assert guard.main(["repository", "--owner", "x", "--repo", "y"]) == 1
     assert "refused" in capsys.readouterr().out
+
+
+def test_publication_docs_enable_pages_between_repo_create_and_push():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for name in ("docs/runbook.md", "README.md"):
+        text = (root / name).read_text(encoding="utf-8")
+        create = text.index("gh repo create")
+        enable = text.index("-f build_type=workflow")
+        verify = text.index("gh api repos/<login>/isolation-test-pages/pages\n")
+        variable = text.index("gh variable set PERSONAL_OWNER")
+        guard = text.index("publish_guard repository")
+        push = text.index("5단계를 통과한 뒤에만 push")
+        assert create < enable < verify < variable < guard < push, name

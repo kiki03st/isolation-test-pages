@@ -131,13 +131,27 @@ isolation-tests report --input results/isolation-report-<run_id>.json --output r
    gh repo create <login>/isolation-test-pages --public --source . --remote origin
    ```
 
-3. 공개 owner 변수를 설정합니다. 값이 없거나 소유자가 다르면 build가 실행되지 않습니다.
+3. 한 번만 수동으로 Pages를 켭니다(첫 push 전). 빌드 유형은 "workflow"(GitHub Actions)입니다.
+   아래 명령 또는 Settings > Pages > Source: GitHub Actions 중 하나를 사용합니다. 켜지 않으면
+   첫 배포가 404로 실패할 수 있습니다.
+
+   ```
+   gh api -X POST repos/<login>/isolation-test-pages/pages -f build_type=workflow
+   ```
+
+   읽기 전용으로 확인합니다(build_type이 workflow여야 함).
+
+   ```
+   gh api repos/<login>/isolation-test-pages/pages
+   ```
+
+4. 공개 owner 변수를 설정합니다. 값이 없거나 소유자가 다르면 build가 실행되지 않습니다.
 
    ```
    gh variable set PERSONAL_OWNER --body <login> --repo <login>/isolation-test-pages
    ```
 
-4. 저장소 가드를 실행합니다. 인증된 계정이 User인지, 저장소 owner가 User이고 fork가
+5. 저장소 가드를 실행합니다. 인증된 계정이 User인지, 저장소 owner가 User이고 fork가
    아니며 공개인지, origin의 fetch URL과 모든 push URL(pushurl, 여러 push URL,
    pushInsteadOf 적용 후)이 owner/repo와 일치하는지, 전체 이력이 noreply인지 확인합니다.
 
@@ -145,12 +159,13 @@ isolation-tests report --input results/isolation-report-<run_id>.json --output r
    python -m isolation_tests.publish_guard repository --owner <login> --repo isolation-test-pages
    ```
 
-5. 4단계를 통과한 뒤에만 push합니다. force-push는 하지 않습니다.
+6. 5단계를 통과한 뒤에만 push합니다. force-push는 하지 않습니다.
 
 저장소 이름이 다르면 모든 명령, 가드 인자, 원격을 그 이름으로 함께 바꿉니다.
 
-저장소가 이미 있으면 읽기 전용으로 owner, 공개 여부, Pages 상태만 확인합니다. 기존 내용을
-교체하거나 덮어쓰지 않습니다. 가드가 거부하면 중단합니다.
+저장소가 이미 있으면 읽기 전용으로 owner, 공개 여부, Pages 상태(`gh api repos/<login>/isolation-test-pages/pages`)만
+확인합니다. 기존 내용을 교체하거나 덮어쓰지 않습니다. Pages가 켜져 있지 않으면 중단하고
+소유자에게 문의합니다. 가드가 거부해도 중단합니다.
 
 - 저장소 소유자는 개인 User 계정이어야 합니다(조직 불가). 조직 저장소 원격을 재사용하지 않습니다.
 - 게시 주소는 실제 게시가 끝난 뒤에 README에 적습니다.
