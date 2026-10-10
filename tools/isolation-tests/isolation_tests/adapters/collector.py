@@ -74,7 +74,8 @@ def _text(value, nullable=False):
     return (nullable and value is None) or isinstance(value, str)
 
 
-def _parse(raw: bytes) -> CollectedPage:
+def _parse(raw: bytes, submitted: str) -> CollectedPage:
+    """The collector's answer for exactly ``submitted``; a cached or foreign result is rejected."""
     try:
         data = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object,
                           parse_constant=_reject_constant)
@@ -91,10 +92,13 @@ def _parse(raw: bytes) -> CollectedPage:
         and isinstance(chain, list) and all(isinstance(item, str) for item in chain)
         and isinstance(failures, list) and all(isinstance(item, str) for item in failures)
         and type(elapsed) is int and elapsed >= 0
-        and (status is None or type(status) is int)
+        and (status is None or (type(status) is int and 100 <= status <= 599))
     )
     if not valid:
         raise CollectionError("malformed_response")
+    if data["input_url"] != submitted:
+        # Another run's, case's or variant's result is not this trial's observation.
+        raise CollectionError("collection_mismatch")
     if "stub_not_collected" in failures:
         raise CollectionError("stub_not_collected")
     # Remote failures are reported as short codes; free text is not echoed.
@@ -153,7 +157,7 @@ async def _post(client: httpx.AsyncClient, config: RuntimeConfig, url: str,
             raise CollectionError("unexpected_status")
         limit = min(config.limits.get("runner_response_bytes", HARD_RESPONSE_BYTES),
                     HARD_RESPONSE_BYTES)
-        return _parse(await read_limited(response, int(limit)))
+        return _parse(await read_limited(response, int(limit)), url)
     finally:
         await response.aclose()
 

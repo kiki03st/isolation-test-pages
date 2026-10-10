@@ -489,3 +489,26 @@ def test_bad_ca_file_and_invalid_url_map_to_fixed_codes(configured_collector, tm
     assert caught.value.code == "collector_url_invalid"
     _assert_clean(caught.value)
     assert {"collector_not_configured", "token_missing", "token_invalid", "ca_file_unusable"} <= PREPARATION_CODES
+
+
+# --- final review #6: the response is bound to the submitted URL ------------------
+
+@pytest.mark.parametrize("input_url", [
+    "https://example.invalid/other", "https://example.invalid/synthetic?run_id=foreign",
+    "HTTPS://EXAMPLE.INVALID/synthetic", "",
+])
+def test_response_for_another_url_is_a_collection_mismatch(configured_collector, input_url):
+    error = collection_error(configured_collector, lambda request: raw_response(page_payload(input_url=input_url)))
+    assert error.code == "collection_mismatch"
+
+
+@pytest.mark.parametrize("status", [0, 99, 600, 1000, -200])
+def test_status_code_outside_http_range_is_malformed(configured_collector, status):
+    error = collection_error(configured_collector, lambda request: raw_response(page_payload(status_code=status)))
+    assert error.code == "malformed_response"
+
+
+@pytest.mark.parametrize("status", [100, 200, 404, 599, None])
+def test_status_code_inside_http_range_or_absent_is_accepted(configured_collector, status):
+    page = invoke(configured_collector, lambda request: raw_response(page_payload(status_code=status)))
+    assert page.status_code == status and page.input_url == INPUT
