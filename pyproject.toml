@@ -2,7 +2,7 @@
 name = "isolation-test-pages"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["httpx==0.28.1"]
+dependencies = ["httpx==0.28.1", "certifi>=2024.2.2"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9", "playwright==1.63.0"]

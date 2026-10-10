@@ -231,3 +231,22 @@ def test_publication_docs_enable_pages_between_repo_create_and_push():
         guard = text.index("publish_guard repository")
         push = text.index("5단계를 통과한 뒤에만 push")
         assert create < enable < verify < variable < guard < push, name
+
+
+# --- final review minors: local evidence is ignored; direct imports are declared ---
+
+def test_gitignore_excludes_probe_output_receiver_logs_and_certificates():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    patterns = set((root / ".gitignore").read_text(encoding="utf-8").split())
+    assert {"host-probe*.json", "*.jsonl", "*.crt", "*.p12"} <= patterns
+
+
+def test_directly_imported_certifi_is_a_declared_dependency():
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert any(item.split(">")[0].split("=")[0].strip() == "certifi" for item in project["dependencies"])
