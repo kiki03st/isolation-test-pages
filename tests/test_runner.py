@@ -1611,6 +1611,20 @@ def test_network_relative_receiver_needs_an_isolation_side_control(cases, config
     assert sent == []  # the runner never sends a control to a network-relative receiver
 
 
+def test_control_in_the_same_millisecond_as_the_run_end_is_not_after_it(cases, config, evidence_dir,
+                                                                        monkeypatch):
+    """The run's clock keeps milliseconds; a control in that millisecond is not later."""
+    from datetime import datetime, timezone
+    from isolation_tests import runner
+
+    at = datetime.now(timezone.utc).replace(microsecond=109_600)
+    monkeypatch.setattr(runner, "_now", lambda: at.isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-03": lambda url: _page(url, "<p>n</p>", title=None)}))
+    _control_event(evidence_dir, "NET-03", "run-rel-ms", at.isoformat())
+    outcome = _net03_loopback(cases, config, evidence_dir, "run-rel-ms")
+    assert (outcome.status, outcome.reason) == ("blocked", "receiver_log_coverage_unproven"), outcome
+
+
 def test_network_relative_receiver_with_an_isolation_side_control_is_judged(cases, config, evidence_dir,
                                                                           monkeypatch, receiver_controls):
     from isolation_tests import runner

@@ -704,7 +704,12 @@ def _isolation_side_controls(case_id: str, obs: Observation, admin: Evidence, fa
         return False
     from datetime import datetime
 
-    return all(datetime.fromisoformat(event["at"]) > ended for event in controls)
+    # ended_at keeps milliseconds only; compare at that resolution so a control in the
+    # run's final millisecond does not count as after it.
+    def millis(moment):
+        return moment.replace(microsecond=moment.microsecond // 1000 * 1000)
+
+    return all(millis(datetime.fromisoformat(event["at"])) > ended for event in controls)
 
 
 def _followup_check(admin: Evidence, obs: Observation, config: RuntimeConfig) -> Outcome:
