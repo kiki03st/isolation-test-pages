@@ -345,33 +345,107 @@ def _control_config(bases):
                          allow_loopback_http=True)
 
 
-def test_runner_control_reaches_the_variants_receiver_and_is_logged(fixture_server_factory):
+def _send(config, case_id, variant, run_id):
     import asyncio
 
-    from isolation_tests.receiver import is_control_event, read_receiver_events
-    from isolation_tests.runner import send_receiver_control
+    from isolation_tests.adapters.receiver_control import send_control
 
-    forbidden, private = fixture_server_factory(), fixture_server_factory()
-    config = _control_config({"forbidden_receiver": forbidden.base + "/", "private": private.base + "/"})
-    assert asyncio.run(send_receiver_control(config, "NET-01", "img", "run-ctl-a")) == "sent"
-    assert asyncio.run(send_receiver_control(config, "NET-03", "private", "run-ctl-b")) == "sent"
-    first, = read_receiver_events(forbidden.log_path, "run-ctl-a")
-    second, = read_receiver_events(private.log_path, "run-ctl-b")
-    assert is_control_event(first) and first["case_id"] == "NET-01"
-    assert is_control_event(second) and second["case_id"] == "NET-03"
-    assert read_receiver_events(forbidden.log_path, "run-ctl-b") == ()
+    return asyncio.run(send_control(config, case_id, variant, run_id))
+
+
+def _lines(path):
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def test_fixture_names_the_receiver_it_renders_for_a_variant(fixture_server_factory):
+    receiver = fixture_server_factory()
+    fixture = fixture_server_factory(targets={"forbidden_receiver": receiver.base,
+                                              "main_public": receiver.base + "/"})
+    get = lambda path: httpx.get(fixture.base + path, trust_env=False)  # noqa: E731
+    named = get("/v1/receiver-target/NET-01/img?run_id=run-tgt")
+    assert named.status_code == 200
+    assert named.text == f"{receiver.base}/v1/receive/NET-01?run_id=run-tgt"
+    assert get("/v1/receiver-target/NET-03/main-public?run_id=run-tgt").text \
+        == f"{receiver.base}/v1/receive/NET-03?run_id=run-tgt"
+    assert get("/v1/receiver-target/NET-07/userinfo?run_id=run-tgt").status_code == 404
+    assert get("/v1/receiver-target/NET-01/nope?run_id=run-tgt").status_code == 404
+    assert get("/v1/receiver-target/NET-01/img").status_code == 400
+    assert get("/v1/receiver-target/NET-03/loopback?run_id=run-tgt").status_code == 503
+    assert _lines(receiver.log_path) == []  # naming a target records nothing
+
+
+def test_runner_control_goes_to_the_receiver_the_fixture_renders(fixture_server_factory):
+    from isolation_tests.receiver import is_control_event, read_receiver_events
+
+    receiver = fixture_server_factory()
+    fixture = fixture_server_factory(targets={"forbidden_receiver": receiver.base})
+    config = _control_config({"http_fixture": fixture.base + "/", "forbidden_receiver": receiver.base + "/"})
+    assert _send(config, "NET-01", "img", "run-ctl-a") == "sent"
+    event, = read_receiver_events(receiver.log_path, "run-ctl-a")
+    assert is_control_event(event) and event["case_id"] == "NET-01"
+
+
+def test_runner_control_is_refused_when_its_receiver_differs_from_the_fixtures(fixture_server_factory):
+    leak_target, other = fixture_server_factory(), fixture_server_factory()
+    fixture = fixture_server_factory(targets={"forbidden_receiver": leak_target.base})
+    config = _control_config({"http_fixture": fixture.base + "/", "forbidden_receiver": other.base + "/"})
+    assert _send(config, "NET-01", "img", "run-ctl-b") == "receiver_control_target_mismatch"
+    assert _lines(other.log_path) == [] and _lines(leak_target.log_path) == []
+
+
+def test_network_relative_receivers_get_no_runner_control(fixture_server_factory):
+    receiver = fixture_server_factory()
+    fixture = fixture_server_factory(targets={"private": receiver.base, "loopback": receiver.base,
+                                              "link_local": receiver.base})
+    bases = {"http_fixture": fixture.base + "/", "private": receiver.base + "/",
+             "loopback": receiver.base + "/", "link_local": receiver.base + "/"}
+    config = _control_config(bases)
+    for case_id, variant in (("NET-03", "loopback"), ("NET-03", "private"), ("NET-03", "link-local"),
+                             ("NET-07", "initial-private")):
+        assert _send(config, case_id, variant, "run-ctl-c") == "receiver_control_isolation_side"
+    assert _lines(receiver.log_path) == []
 
 
 def test_runner_control_without_a_receiver_url_or_receiver_is_not_sent(fixture_server_factory):
-    import asyncio
     import socket
 
-    from isolation_tests.runner import send_receiver_control
-
-    assert asyncio.run(send_receiver_control(_control_config({}), "NET-01", "img", "run-ctl-c")) \
-        == "receiver_control_not_configured"
+    assert _send(_control_config({}), "NET-01", "img", "run-ctl-d") == "receiver_control_not_configured"
+    receiver = fixture_server_factory()
+    no_fixture = _control_config({"forbidden_receiver": receiver.base + "/"})
+    assert _send(no_fixture, "NET-01", "img", "run-ctl-d") == "receiver_control_not_configured"
+    assert _lines(receiver.log_path) == []
     with socket.socket() as probe:  # a loopback port with no listener
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     down = _control_config({"forbidden_receiver": f"http://127.0.0.1:{port}/"})
-    assert asyncio.run(send_receiver_control(down, "NET-01", "img", "run-ctl-d")) == "receiver_control_failed"
+    # NET-07 targets come from the runner's own configuration: no fixture check applies.
+    assert _send(down, "NET-07", "userinfo", "run-ctl-e") == "receiver_control_failed"
+    fixture_down = _control_config({"http_fixture": f"http://127.0.0.1:{port}/",
+                                    "forbidden_receiver": receiver.base + "/"})
+    assert _send(fixture_down, "NET-01", "img", "run-ctl-f") == "receiver_control_target_unverified"
+
+
+def test_receiver_logs_require_a_real_evidence_directory(tmp_path):
+    import os
+
+    from isolation_tests.receiver import read_receiver_logs
+
+    real = tmp_path / "evidence"
+    real.mkdir()
+    (real / "receiver-a.jsonl").write_text("", encoding="utf-8")
+    assert read_receiver_logs(real, "run-x") == ()
+    link = tmp_path / "linked"
+    try:
+        os.symlink(real, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        try:  # Windows without symlink rights: a directory junction is a reparse point too
+            import _winapi
+
+            _winapi.CreateJunction(str(real), str(link))
+        except (ImportError, OSError):
+            link = None
+    if link is not None:
+        with pytest.raises(ValueError):
+            read_receiver_logs(link, "run-x")
+    with pytest.raises(ValueError):
+        read_receiver_logs(real / "receiver-a.jsonl", "run-x")

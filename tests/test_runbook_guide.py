@@ -100,14 +100,18 @@ def _ai_facts(case_id):
 
 
 def _emitted(case, variant, tmp_path, monkeypatch):
-    """Every fact the runner path records for one variant when every adapter succeeds."""
+    """Every fact the runner path records for one variant when every adapter succeeds.
+
+    The fakes always succeed, so this proves the runner *can* emit each fact for the
+    variant on its success path, not that it emits it under every failure.
+    """
     import asyncio
     from datetime import datetime, timedelta, timezone
 
     from isolation_tests import runner
     from isolation_tests.config import DEFAULT_LIMITS
     from isolation_tests.model import CollectedPage, Evidence, Outcome, RuntimeConfig
-    from isolation_tests.receiver import RECEIVER_CASES, write_receiver_event
+    from isolation_tests.receiver import RECEIVER_CASES, isolation_side_control, write_receiver_event
 
     evidence = tmp_path / f"evidence-{case.id}-{variant}"
     evidence.mkdir()
@@ -158,6 +162,11 @@ def _emitted(case, variant, tmp_path, monkeypatch):
                          {"variant": variant})
         if case.id in RECEIVER_CASES:
             control(case.id, run_id)
+    elif isolation_side_control(case.id, variant):  # sent from inside the container after the run
+        admin = Evidence(run_id, case.id, now(-5).replace("+00:00", "Z"), now(60).replace("+00:00", "Z"),
+                         {"variant": variant})
+        write_receiver_event(evidence / "receiver-guide.jsonl", case_id=case.id, run_id=run_id,
+                             method="GET", fixed_path=f"/v1/control/{case.id}", bytes_sent=2, at=now(1))
     receiver, _ = runner._receiver_facts(case, variant, obs, admin, config, {})
     return set(obs.facts) | set(receiver or {})
 

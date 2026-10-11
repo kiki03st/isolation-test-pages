@@ -127,13 +127,25 @@ def is_control_event(event: dict) -> bool:
     return isinstance(event.get("path"), str) and event["path"].startswith(CONTROL_PREFIX)
 
 
-def control_base_key(case_id: str, variant: str) -> str:
-    """The configured base whose receiver a leak of this variant would reach."""
+# Cases whose leak URL the fixture server renders from its own --target map.
+FIXTURE_RENDERED = frozenset({"NAV-04", "NET-01", "NET-02", "NET-03", "NET-04", "NET-06"})
+# Receivers addressed relative to the isolation container's network: the runner's
+# host cannot reach them as the same endpoint, so only an isolation-side control counts.
+ISOLATION_SIDE_BASES = frozenset({"loopback", "private", "link_local"})
+
+
+def receiver_base_key(case_id: str, variant: str) -> str:
+    """The target name whose receiver a leak of this variant reaches (fixture and runner alike)."""
     if case_id in {"NET-03", "NET-04"}:
         return variant.replace("-", "_")
     if (case_id, variant) == ("NET-07", "initial-private"):
         return "private"
     return "forbidden_receiver"
+
+
+def isolation_side_control(case_id: str, variant: str) -> bool:
+    """True when the liveness control must be sent from inside the isolation environment."""
+    return receiver_base_key(case_id, variant) in ISOLATION_SIDE_BASES
 
 
 def is_receiver_log(name: str) -> bool:
@@ -148,6 +160,10 @@ def read_receiver_logs(directory: Path, run_id: str) -> tuple[dict, ...] | None:
     """
     root = Path(directory)
     try:
+        info = os.lstat(root)
+        if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise ValueError("evidence directory must be a real directory")
         names = sorted(entry.name for entry in os.scandir(root) if is_receiver_log(entry.name))
     except OSError:
         raise ValueError("evidence directory could not be read") from None

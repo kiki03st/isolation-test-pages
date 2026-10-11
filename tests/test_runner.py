@@ -1307,8 +1307,12 @@ def test_every_receiver_case_requires_the_runner_read_receiver_log(cases, config
     outcome = _run(runner.run_case(cases[case_id], variant, replace(config, capabilities=frozenset(caps)),
                                    "run-recv-g"))
     assert (outcome.status, outcome.reason) == ("blocked", "receiver_log_unavailable"), outcome
-    # The runner tried to prove the log live with one control for exactly this trial.
-    assert receiver_controls == [(case_id, variant, "run-recv-g")]
+    # The runner tried to prove the log live with one control for exactly this trial,
+    # except for a network-relative receiver, whose control must come from the isolation side.
+    from isolation_tests.receiver import isolation_side_control
+
+    expected = [] if isolation_side_control(case_id, variant) else [(case_id, variant, "run-recv-g")]
+    assert receiver_controls == expected
 
 
 def test_evidence_only_receiver_case_uses_the_admin_window(cases, config, evidence_dir):
@@ -1381,11 +1385,11 @@ def test_observed_overload_within_the_limit_confirms_enforcement(cases, config, 
             return CollectionError("collector_rate_limited")
         return _page(url, "<p>s</p>", title=None)
 
-    _lim06_admin(evidence_dir, concurrency_limit_ok=True)
+    _lim06_admin(evidence_dir, concurrency_limit_ok=True, recovery_ok=True)
     outcome = _lim06(cases, config, monkeypatch, answer)
     facts = outcome.details["observed_facts"]
     assert (facts["limit_exceeded_confirmed"], facts["concurrency_limit_ok"]) == (True, True)
-    assert outcome.reason != "evidence_conflict"
+    assert (outcome.status, outcome.reason) == ("passed", "observed_expectations_met"), outcome
 
 
 def test_inconclusive_concurrency_results_record_no_limit_fact(cases, config, evidence_dir, monkeypatch):
@@ -1576,3 +1580,60 @@ def test_evidence_only_receiver_case_needs_the_control_in_the_admin_window(cases
         assert outcome.reason == expected[1]
     else:
         assert outcome.details["observed_facts"]["receiver_control_ok"] is True
+
+
+# --- fix round 1: the control must reach the receiver the leak would reach ------------
+
+def _net03_loopback(cases, config, evidence_dir, run_id):
+    from isolation_tests import runner
+
+    contract = cases["NET-03"].expected_observations["variants"]["loopback"]
+    caps = ALL_CAPS | set(cases["NET-03"].required_capabilities) | set(contract["required_capabilities"])
+    _write_evidence(evidence_dir, run_id, "NET-03", "loopback", {
+        "receiver_control_ok": True, "request_blocked": True, "receiver_observed": False})
+    return _run(runner.run_case(cases["NET-03"], "loopback",
+                                replace(config, capabilities=frozenset(caps)), run_id))
+
+
+@pytest.mark.parametrize("log", ["unrelated", "runner-window"])
+def test_network_relative_receiver_needs_an_isolation_side_control(cases, config, evidence_dir, monkeypatch, log):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-03": lambda url: _page(url, "<p>n</p>", title=None)}))
+    sent = _live_receiver(monkeypatch, evidence_dir)
+    if log == "unrelated":  # a live log, but nothing sent for this trial from the isolation side
+        _control_event(evidence_dir, "NET-01", "run-other", _utc())
+        _control_event(evidence_dir, "NET-03", "run-other", _utc(2))
+    else:  # a control logged during the run itself cannot come from the isolation side
+        _control_event(evidence_dir, "NET-03", "run-rel-a", _utc())
+    outcome = _net03_loopback(cases, config, evidence_dir, "run-rel-a")
+    assert (outcome.status, outcome.reason) == ("blocked", "receiver_log_coverage_unproven"), outcome
+    assert sent == []  # the runner never sends a control to a network-relative receiver
+
+
+def test_network_relative_receiver_with_an_isolation_side_control_is_judged(cases, config, evidence_dir,
+                                                                          monkeypatch, receiver_controls):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-03": lambda url: _page(url, "<p>n</p>", title=None)}))
+    # Sent by the administrator from inside the isolation container after the run,
+    # inside the administrator's record window.
+    _control_event(evidence_dir, "NET-03", "run-rel-b", _utc(2))
+    outcome = _net03_loopback(cases, config, evidence_dir, "run-rel-b")
+    assert receiver_controls == []
+    assert outcome.status == "passed", outcome
+    facts = outcome.details["observed_facts"]
+    assert (facts["receiver_observed"], facts["receiver_control_ok"]) == (False, True)
+
+
+def test_network_relative_receiver_without_admin_record_is_coverage_unproven(cases, config, evidence_dir,
+                                                                          monkeypatch):
+    from isolation_tests import runner
+
+    contract = cases["NET-03"].expected_observations["variants"]["loopback"]
+    caps = ALL_CAPS | set(cases["NET-03"].required_capabilities) | set(contract["required_capabilities"])
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-03": lambda url: _page(url, "<p>n</p>", title=None)}))
+    _control_event(evidence_dir, "NET-03", "run-rel-c", _utc(2))
+    outcome = _run(runner.run_case(cases["NET-03"], "loopback", replace(config, capabilities=frozenset(caps)),
+                                   "run-rel-c"))
+    assert (outcome.status, outcome.reason) == ("blocked", "receiver_log_coverage_unproven"), outcome

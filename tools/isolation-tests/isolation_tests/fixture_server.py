@@ -26,7 +26,10 @@ from .fixtures import (
     LIMIT_BASES, MAX_FIXTURE_BYTES, NET_VARIANTS, SAMPLE_BYTES, boundary_html, bulk_body,
     render_http, render_network, render_resource, render_static,
 )
-from .receiver import CONTROL_PREFIX, RECEIVE_PREFIX, RECEIVER_CASES, RUN_ID, write_receiver_event
+from .receiver import (
+    CONTROL_PREFIX, FIXTURE_RENDERED, RECEIVE_PREFIX, RECEIVER_CASES, RUN_ID, receiver_base_key,
+    write_receiver_event,
+)
 from .targets import normalize_base
 
 
@@ -184,7 +187,7 @@ def _network(case_id, variant, targets, run_id):
         if case_id == "NET-06":
             derived["http_fixture"] = targets.get("http_fixture")
     else:
-        key = variant.replace("-", "_")
+        key = receiver_base_key(case_id, variant)
         derived = {key: _receiver(targets, key, case_id, run_id)}
     body = render_network(case_id, variant, derived)
     if case_id == "NET-06" and variant in {"worker", "service-worker"}:
@@ -476,6 +479,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._receive(segments[3], parts.query)
         if segments[:3] == ["", "v1", "control"] and len(segments) == 4:
             return self._receive(segments[3], parts.query, control=True)
+        if segments[:3] == ["", "v1", "receiver-target"] and len(segments) == 5:
+            return self._receiver_target(segments[3], segments[4], parts.query)
         if segments[:3] == ["", "v1", "cases"] and len(segments) == 5:
             return self._case(segments[3], segments[4], parts.query)
         return self._status(404)
@@ -524,6 +529,19 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._record(case_id, run_id, len(_PROBE_BODY), control=control):
             return self._status(503)
         self._respond(_plan(200, _PROBE_BODY, _TEXT))
+
+    def _receiver_target(self, case_id, variant, query):
+        """The exact receiver URL this server renders for the variant's leak (nothing is logged)."""
+        if case_id not in FIXTURE_RENDERED or not is_registered(case_id, variant):
+            return self._status(404)
+        try:
+            url = _receiver(self.server.fixture_config.targets, receiver_base_key(case_id, variant),
+                            case_id, self._query(query)["run_id"])
+        except RequestRejected:
+            return self._status(400)
+        except ValueError:
+            return self._status(503)
+        return self._respond(_plan(200, url.encode("utf-8"), _TEXT))
 
     def _record(self, case_id, run_id, sent, control=False) -> bool:
         """Store the event; False only when a log is configured but the write failed."""

@@ -18,7 +18,6 @@ import json
 import os
 import re
 import secrets
-import ssl
 import stat
 import sys
 import time
@@ -29,12 +28,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import certifi
-import httpx
-
 from .adapters import ai as ai_adapter
 from .adapters import backend as backend_adapter
 from .adapters import collector as collector_adapter
+from .adapters import receiver_control
 from .adapters.collector import PREPARATION_CODES, CollectionError
 from .evaluate import MAX_CONCURRENT_TRIALS, combine, evaluate, merge_analysis, merge_recovery
 from .evidence import (
@@ -44,14 +41,15 @@ from .evidence import (
 from .host_probes import HOST_CASES, validate_host_evidence
 from .manifest import load_cases
 from .model import CaseSpec, CollectedPage, Evidence, Outcome, RuntimeConfig
-from .receiver import RECEIVER_CASES, RUN_ID, control_base_key, is_control_event, read_receiver_logs
-from .targets import case_url, normalize_base
+from .receiver import RECEIVER_CASES, is_control_event, isolation_side_control, read_receiver_logs
+from .targets import case_url
 
 
 # Adapter seams. Tests replace them with in-process fakes; nothing else does.
 COLLECT = collector_adapter.collect
 ANALYZE = ai_adapter.analyze_locally
 PROBE_BACKEND = backend_adapter.probe_backend
+SEND_CONTROL = receiver_control.send_control
 
 CANONICAL_MANIFEST = Path(__file__).resolve().parents[1] / "cases.json"
 STATIC_ROOT = Path(__file__).resolve().parents[3] / "test-pages"
@@ -80,7 +78,6 @@ EXPECTED_ERRORS = {
 # code. A bare 5xx (collector_unavailable) is not evidence that a limit was enforced.
 OVERLOAD_CODES = frozenset({"collector_rate_limited", "collector_busy", "concurrency_limit_exceeded",
                             "queue_full"})
-CONTROL_TIMEOUT_S = 5
 # REC-01: the cases a follow-up run must pass again after a real replacement
 # (normal collection, authentication with the rotated token, host hardening).
 REPLACEMENT_RETESTS = ("COL-01", "INT-01", "HOST-01", "HOST-02", "HOST-03")
@@ -528,41 +525,17 @@ async def _route(case: CaseSpec, variant: str, config: RuntimeConfig, obs: Obser
     await _recovery(case, config, obs)
 
 
-async def send_receiver_control(config: RuntimeConfig, case_id: str, variant: str, run_id: str) -> str:
-    """One control GET straight to the variant's receiver, never through the collector.
-
-    The receiver logs it as ``/v1/control/<case>`` with this run_id and answers 200
-    only after storing it. Returns "sent" or a fixed code; nothing else is reported.
-    """
-    try:
-        base = normalize_base(config.bases[control_base_key(case_id, variant)], config.allow_loopback_http)
-    except (KeyError, ValueError):
-        return "receiver_control_not_configured"
-    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
-        return "receiver_control_not_configured"
-    try:
-        context = ssl.create_default_context(cafile=certifi.where())
-        if config.ca_file is not None:
-            context.load_verify_locations(cafile=str(config.ca_file))
-        async with asyncio.timeout(CONTROL_TIMEOUT_S):
-            async with httpx.AsyncClient(verify=context, follow_redirects=False, trust_env=False,
-                                         timeout=CONTROL_TIMEOUT_S) as client:
-                response = await client.get(f"{base}v1/control/{case_id}", params={"run_id": run_id})
-    except (httpx.HTTPError, OSError, ssl.SSLError, TimeoutError):
-        return "receiver_control_failed"
-    return "sent" if response.status_code == 200 else "receiver_control_rejected"
-
-
-SEND_CONTROL = send_receiver_control  # adapter seam; tests replace it
-
-
 async def observe(case: CaseSpec, variant: str, config: RuntimeConfig, run_id: str) -> Observation:
     obs = Observation(run_id=run_id, started_at=_now())
     try:
         await _route(case, variant, config, obs)
         if obs.actions and not obs.preblocked and "receiver_observed" in _required(case, variant):
-            # Inside the trial window: prove the receiver log is live for this run_id.
-            obs.notes["receiver_control"] = await SEND_CONTROL(config, case.id, variant, run_id)
+            if isolation_side_control(case.id, variant):
+                # The runner's host cannot reach this receiver as the container would.
+                obs.notes["receiver_control"] = "receiver_control_isolation_side"
+            else:
+                # Inside the trial window: prove the leak's receiver log is live for this run_id.
+                obs.notes["receiver_control"] = await SEND_CONTROL(config, case.id, variant, run_id)
     finally:
         obs.ended_at = _now()
     return obs
@@ -676,6 +649,9 @@ def _receiver_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evide
     the runner's own window when it acted, else the administrator's record. The logs
     count only when they hold this trial's control event (``/v1/control/<case>``)
     inside that window; an empty, stale or foreign log is ``receiver_log_coverage_unproven``.
+    For a network-relative receiver (``isolation_side_control``) the runner sends no
+    control: the control must come from the isolation side after the run ended and
+    inside the administrator's record window.
     The control itself is never an observed request. A missing or unreadable log, or a
     late, early or foreign request event, proves nothing.
     """
@@ -700,7 +676,10 @@ def _receiver_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evide
         facts[CLOCK_FACT] = admin.facts[CLOCK_FACT]
     trial = Evidence(obs.run_id, case.id, start, end, facts)
     controls = tuple(event for event in events if is_control_event(event))
-    if receiver_observed(trial, controls) is not True:
+    if obs.actions and isolation_side_control(case.id, variant):
+        if admin is None or not _isolation_side_controls(case.id, obs, admin, facts, controls):
+            return None, "receiver_log_coverage_unproven"
+    elif receiver_observed(trial, controls) is not True:
         return None, "receiver_log_coverage_unproven"
     requests = tuple(event for event in events if not is_control_event(event))
     observed = receiver_observed(trial, requests)
@@ -708,6 +687,24 @@ def _receiver_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evide
         return None, "receiver_evidence_inconclusive"
     notes["receiver_events"] = len(requests)
     return {"receiver_observed": observed, "receiver_control_ok": True}, None
+
+
+def _isolation_side_controls(case_id: str, obs: Observation, admin: Evidence, facts: dict, controls) -> bool:
+    """Every control of this run_id was logged after the run ended, inside the admin window.
+
+    The run_id is unknown until the report exists, and a control logged during the run
+    could not have come from the isolation side, so the lower bound has no clock slack.
+    """
+    window = Evidence(obs.run_id, case_id, admin.started_at, admin.ended_at, facts)
+    if not controls or receiver_observed(window, controls) is not True:
+        return False
+    try:
+        ended = parse_utc(obs.ended_at)
+    except EvidenceUnavailable:
+        return False
+    from datetime import datetime
+
+    return all(datetime.fromisoformat(event["at"]) > ended for event in controls)
 
 
 def _followup_check(admin: Evidence, obs: Observation, config: RuntimeConfig) -> Outcome:

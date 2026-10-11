@@ -28,11 +28,14 @@
 두 호스트는 격리 서버와 같은 호스트에 두지 않습니다. 설정의 `bases`에 `pages`,
 `http_fixture`, `forbidden_receiver`를 지정합니다.
 
-수신 대조 요청(8-2)은 실행기가 같은 `bases`의 수신 주소로 직접 보냅니다. NET-03·NET-04
-변형은 변형 이름의 base(`loopback`, `private`, `link_local`, `main_public`,
+수신 대조 요청(8-2)의 대상은 그 변형의 유출 요청이 가는 수신기입니다. NET-03·NET-04
+변형은 변형 이름의 대상(`loopback`, `private`, `link_local`, `main_public`,
 `isolation_public`, `shared_ip_host`, `same_host_path`), NET-07 initial-private는 `private`,
-나머지는 `forbidden_receiver`입니다. 실행기 위치에서 그 주소에 닿지 않으면 대조가 기록되지
-않아 그 변형은 blocked(`receiver_log_coverage_unproven`)입니다.
+나머지는 `forbidden_receiver`입니다. 표본 서버의 `--target`과 실행기 설정의 `bases`에 같은
+이름·주소를 적습니다. 실행기는 보내기 전에 표본 서버에 그 변형의 수신 주소를 물어 자기
+`bases` 주소와 같은지 확인하고, 다르면 보내지 않습니다(blocked,
+`receiver_log_coverage_unproven`). 격리 컨테이너 기준 주소인 `loopback`·`private`·`link_local`에는
+실행기가 대조를 보내지 않습니다(8-2의 격리 측 대조).
 
 ## 3. 허용 목록 전환은 별도 작업
 
@@ -246,14 +249,29 @@ isolation-tests report --input results/isolation-report-<run_id>.json --output r
   읽어 그 변형의 run_id와 시험 구간(±1초)에 묶습니다.
   - 기록이 살아 있었다는 증명(대조): 실행기는 시험 구간 안에 그 변형의 수신 주소(2절)로
     `GET /v1/control/<사례>?run_id=<run_id>`를 직접 보냅니다(수집기·격리 환경을 거치지 않음).
-    수신기는 이를 `path: "/v1/control/<사례>"`로 같은 JSONL에 기록하고, 기록한 뒤에만 200으로
-    답합니다. 이 대조 기록이 그 run_id·사례로 시험 구간 안에 있어야 수신 기록을 판정에 씁니다.
-    대조 기록은 관측된 요청으로 세지 않습니다.
+    NAV-04·NET-01~04·NET-06은 먼저 표본 서버의 `GET /v1/receiver-target/<사례>/<변형>?run_id=`가
+    돌려준 유출 수신 주소와 대조 주소가 같은 수신기인지 확인합니다. 다르거나 확인할 수 없으면
+    보내지 않습니다. 수신기는 대조를 `path: "/v1/control/<사례>"`로 같은 JSONL에 기록하고, 기록한
+    뒤에만 200으로 답합니다. 이 대조 기록이 그 run_id·사례로 시험 구간 안에 있어야 수신 기록을
+    판정에 씁니다. 대조 기록은 관측된 요청으로 세지 않습니다.
+  - 대조는 그 순간 기록 장치가 동작했음을 보일 뿐, 구간 전체에 걸쳐 계속 동작했음을 보이지는
+    않습니다.
+  - 격리 측 대조(NET-03 loopback·private·link-local, NET-07 initial-private): 실행기 호스트는
+    이 수신기에 격리 컨테이너와 같은 주소로 닿지 못하므로 실행기는 대조를 보내지 않습니다.
+    관리자가 `run`이 끝난 뒤 리포트의 그 변형 `details.run_id`로, 격리 컨테이너 안에서
+    관리자 기록 구간 안에 다음 주소를 요청합니다.
+    `curl -fsS "<표본 서버 --target의 그 이름 주소>/v1/control/<사례>?run_id=<run_id>"`
+    정확한 주소는 표본 서버의 `/v1/receiver-target/<사례>/<변형>?run_id=<run_id>` 응답에서
+    `/v1/receive/`를 `/v1/control/`로 바꾼 값입니다(NET-07 initial-private는 설정의 `private`
+    주소). 그 run_id의 대조 기록이 모두 실행 종료(`details.ended_at`) 뒤, 관리자 구간 안에
+    있어야 합니다. 관리자 기록이 없거나 이 대조가 없으면 `receiver_log_coverage_unproven`입니다.
   - `receiver_control_ok`는 실행기가 이 대조 기록에서 만듭니다. 관리자가 `true`를 적어도 대조
     기록이 없으면 통과하지 못하고, 관리자 값이 실행기 값과 다르면 `evidence_conflict`입니다.
   - 대조 기록이 없으면(빈 기록, 오래된 기록, 다른 run_id·사례의 기록, 수신기 중단, 수신 주소
-    미설정) `receiver_log_coverage_unproven`입니다. 파일이 없으면 `receiver_log_unavailable`,
-    형식이 틀리면 `receiver_log_unreadable`, 구간 밖·다른 사례의 요청 기록이 있으면
+    미설정, 표본 서버와 다른 수신기) `receiver_log_coverage_unproven`입니다. 파일이 없으면
+    `receiver_log_unavailable`,
+    형식이 틀리거나 `evidence_dir`가 실제 폴더가 아니면 `receiver_log_unreadable`, 구간 밖·다른
+    사례의 요청 기록이 있으면
     `receiver_evidence_inconclusive`입니다(모두 blocked).
   - 증거 전용 NET-05: 실행기가 행동하지 않으므로 관리자가 관리자 기록 구간 안에 같은 요청을
     보냅니다. 예: `curl -fsS "https://<수신 호스트>/v1/control/NET-05?run_id=<리포트 run_id>"`.
