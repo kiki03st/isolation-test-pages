@@ -151,6 +151,9 @@ async def _post(client: httpx.AsyncClient, config: RuntimeConfig, url: str,
             raise CollectionError("api_redirect_rejected")
         if status in {401, 403}:
             raise CollectionError("authentication_failed")
+        if status == 429:
+            # Too Many Requests: the collector says it is over its active limit.
+            raise CollectionError("collector_rate_limited")
         if status >= 500:
             raise CollectionError("collector_unavailable")
         if status != 200:

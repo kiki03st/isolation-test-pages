@@ -1,5 +1,5 @@
 {
-  "note": "Synthetic placeholders only. Each record becomes one JSONL line in the evidence directory. Only approved fact names are accepted; secrets, instance IDs and file contents must never be written here.",
+  "note": "Synthetic placeholders only. Each record becomes one JSONL line in the evidence directory. Only approved fact names are accepted; secrets, instance IDs and file contents must never be written here. receiver_observed and receiver_control_ok are never written here: the runner reads them from the receiver log, which must hold the trial's /v1/control/<case> event (for NET-05 sent by the administrator inside this record's window).",
   "records": [
     {
       "run_id": "example-run-1",
@@ -30,9 +30,7 @@
         "boundary": "container",
         "evidence_source": "observed",
         "positive_control_ok": true,
-        "receiver_control_ok": true,
         "request_blocked": true,
-        "receiver_observed": false,
         "firewall_drop_observed": true,
         "probe_in_container": true
       },

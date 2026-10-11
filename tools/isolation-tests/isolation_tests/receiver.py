@@ -18,6 +18,11 @@ RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 LOG_PREFIX = "receiver-"
 LOG_SUFFIX = ".jsonl"
 MAX_LOG_BYTES = 1048576
+# Leak probes arrive at /v1/receive/<case>. The runner (or, for evidence-only
+# cases, the administrator) sends one control GET to /v1/control/<case> during
+# the trial to prove the log was live; a control is never an observed request.
+RECEIVE_PREFIX = "/v1/receive/"
+CONTROL_PREFIX = "/v1/control/"
 _FIELDS = ("at", "case_id", "run_id", "method", "path", "bytes_sent")
 _METHOD = re.compile(r"[A-Z]{3,10}")
 _APPEND_LOCK = Lock()
@@ -36,7 +41,7 @@ def _validate(event: object) -> dict:
     method = event["method"]
     if not isinstance(method, str) or not _METHOD.fullmatch(method):
         raise ValueError("receiver event method is unsafe")
-    if event["path"] != f"/v1/receive/{case_id}":
+    if event["path"] not in {RECEIVE_PREFIX + case_id, CONTROL_PREFIX + case_id}:
         raise ValueError("receiver event path is not the fixed receiver path")
     sent = event["bytes_sent"]
     if type(sent) is not int or sent < 0:
@@ -115,6 +120,20 @@ def read_receiver_events(path: Path, run_id: str) -> tuple[dict, ...]:
         if event["run_id"] == run_id:
             events.append(event)
     return tuple(events)
+
+
+def is_control_event(event: dict) -> bool:
+    """True for the liveness control the runner or administrator sent, never a leak."""
+    return isinstance(event.get("path"), str) and event["path"].startswith(CONTROL_PREFIX)
+
+
+def control_base_key(case_id: str, variant: str) -> str:
+    """The configured base whose receiver a leak of this variant would reach."""
+    if case_id in {"NET-03", "NET-04"}:
+        return variant.replace("-", "_")
+    if (case_id, variant) == ("NET-07", "initial-private"):
+        return "private"
+    return "forbidden_receiver"
 
 
 def is_receiver_log(name: str) -> bool:

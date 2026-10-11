@@ -18,6 +18,7 @@ import json
 import os
 import re
 import secrets
+import ssl
 import stat
 import sys
 import time
@@ -27,6 +28,9 @@ from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+import certifi
+import httpx
 
 from .adapters import ai as ai_adapter
 from .adapters import backend as backend_adapter
@@ -40,8 +44,8 @@ from .evidence import (
 from .host_probes import HOST_CASES, validate_host_evidence
 from .manifest import load_cases
 from .model import CaseSpec, CollectedPage, Evidence, Outcome, RuntimeConfig
-from .receiver import read_receiver_logs
-from .targets import case_url
+from .receiver import RECEIVER_CASES, RUN_ID, control_base_key, is_control_event, read_receiver_logs
+from .targets import case_url, normalize_base
 
 
 # Adapter seams. Tests replace them with in-process fakes; nothing else does.
@@ -72,9 +76,11 @@ EXPECTED_ERRORS = {
     ("INT-01", "wrong-token"): frozenset({"authentication_failed"}),
     ("INT-01", "untrusted-ca"): frozenset({"tls_verification_failed"}),
 }
-# Collector answers that mean "over the active limit": HTTP 5xx from the API or a remote code.
-OVERLOAD_CODES = frozenset({"collector_unavailable", "collector_busy", "concurrency_limit_exceeded",
+# Collector answers that mean "over the active limit": HTTP 429 from the API or a remote
+# code. A bare 5xx (collector_unavailable) is not evidence that a limit was enforced.
+OVERLOAD_CODES = frozenset({"collector_rate_limited", "collector_busy", "concurrency_limit_exceeded",
                             "queue_full"})
+CONTROL_TIMEOUT_S = 5
 # REC-01: the cases a follow-up run must pass again after a real replacement
 # (normal collection, authentication with the rotated token, host hardening).
 REPLACEMENT_RETESTS = ("COL-01", "INT-01", "HOST-01", "HOST-02", "HOST-03")
@@ -136,6 +142,7 @@ RUNNER_FACTS = frozenset({
     "authentication_rejected", "concurrency_limit", "limit_plus_one_sent", "limit_exceeded_confirmed",
     "concurrency_limit_ok", "lookup_fallback_ok", "backend_result_ok", "first_response_deadline_ok",
     "collector_deadline_s", "deadline_grace_s", "paired_verdict_equal", "receiver_observed",
+    "receiver_control_ok",
 })
 AI_FACTS = frozenset({"analysis", "fabricated_evidence_rejected", "fallback_ok", "boundary_offsets",
                       "boundary_limit", "boundary_results_ok"})
@@ -147,13 +154,50 @@ PROBE_FACTS = frozenset({
 })
 
 
-def code_facts(case_id: str) -> frozenset[str]:
-    """Facts the runner, the AI adapter or the host probe can produce for this case."""
+# Read by the runner from the receiver logs (a logged control proves the log live).
+RECEIVER_FACTS = frozenset({"receiver_observed", "receiver_control_ok"})
+# Facts recorded on a case's own route in ``_route`` (runner and AI adapter).
+ROUTE_FACTS = {
+    "INT-01": frozenset({"positive_control_ok", "collection", "page_opened", "tls_rejected",
+                         "authentication_ok", "authentication_rejected"}),
+    "INT-03": frozenset({"backend_result_ok", "first_response_deadline_ok"}),
+    "INT-04": frozenset({"positive_control_ok", "lookup_fallback_ok", "analysis", "fallback_ok"}),
+    "LIM-06": frozenset({"positive_control_ok", "concurrency_limit", "limit_plus_one_sent",
+                         "limit_exceeded_confirmed", "concurrency_limit_ok"}),
+    "ANA-08": frozenset({"analysis", "fabricated_evidence_rejected"}),
+    "LIM-04": frozenset({"analysis", "boundary_offsets", "boundary_limit", "boundary_results_ok"}),
+}
+# Facts the generic collection route records (when the variant requires them).
+GENERIC_FACTS = frozenset({"positive_control_ok", "collection", "collector_deadline_s", "deadline_grace_s"})
+
+
+# INT-04 callback-failure goes through the BE route only: no positive control, no analysis.
+VARIANT_FACTS = {("INT-04", "callback-failure"): frozenset({"lookup_fallback_ok"})}
+
+
+def code_facts(case_id: str, variant: str | None = None) -> frozenset[str]:
+    """Facts code really produces for this case (and variant); the rest are the administrator's.
+
+    Per case, not per producer: a fact counts only where the runner, the AI adapter or
+    the host probe emits it for this case (``tests/test_runbook_guide.py`` checks it).
+    """
     if case_id in PROBE_CASES:
         return PROBE_FACTS
+    receiver = RECEIVER_FACTS if case_id in RECEIVER_CASES else frozenset()
     if (case_id, None) in EVIDENCE_ONLY:
-        return frozenset({"receiver_observed"})  # read from the receiver logs
-    return RUNNER_FACTS | AI_FACTS
+        return receiver
+    if (case_id, variant) in VARIANT_FACTS:
+        return VARIANT_FACTS[(case_id, variant)] | receiver
+    if case_id in ROUTE_FACTS:
+        return ROUTE_FACTS[case_id] | receiver
+    facts = set(GENERIC_FACTS) | receiver
+    if case_id == "NET-07":
+        facts.add("page_opened")
+    if case_id in ANALYSIS_CASES:
+        facts.add("analysis")
+    if case_id in PAIRED:
+        facts.add("paired_verdict_equal")
+    return frozenset(facts)
 
 
 def admin_facts(cases) -> dict[str, list[str]]:
@@ -161,7 +205,7 @@ def admin_facts(cases) -> dict[str, list[str]]:
     needed: dict[str, list[str]] = {}
     for case in cases:
         for variant in case.variants:
-            for name in sorted(_required(case, variant) - code_facts(case.id)):
+            for name in sorted(_required(case, variant) - code_facts(case.id, variant)):
                 needed.setdefault(name, []).append(f"{case.id}/{variant}")
     return dict(sorted(needed.items()))
 
@@ -359,9 +403,10 @@ def _limit_facts(results, limit: int) -> dict:
     """What the limit+1 results themselves show about the collector's limit.
 
     Every request collected proves the limit was not enforced (concurrency_limit_ok
-    False). An overload answer with at most limit collected confirms enforcement.
-    Anything else (timeouts, other errors) is inconclusive and records no limit claim,
-    so an administrator's claim cannot replace or contradict the runner's observation.
+    False). An overload answer (OVERLOAD_CODES: HTTP 429 or a remote overload code)
+    with at most limit collected confirms enforcement. Anything else (timeouts, a bare
+    5xx, other errors) is inconclusive and records no limit claim; ``_concurrency`` then
+    blocks the trial, so an administrator's claim can neither replace nor contradict it.
     """
     collected = sum(1 for page, _ in results if page is not None and not page.failures)
     overloaded = sum(1 for page, code in results
@@ -398,6 +443,8 @@ async def _concurrency(case, config, obs) -> None:
     obs.notes["concurrent_results"] = [
         code if page is None else (list(page.failures) or "collected") for page, code in results]
     obs.facts.update(_limit_facts(results, limit))
+    if "concurrency_limit_ok" not in obs.facts:
+        obs.preblocked = "limit_observation_inconclusive"
     await _recovery(case, config, obs)
 
 
@@ -481,10 +528,41 @@ async def _route(case: CaseSpec, variant: str, config: RuntimeConfig, obs: Obser
     await _recovery(case, config, obs)
 
 
+async def send_receiver_control(config: RuntimeConfig, case_id: str, variant: str, run_id: str) -> str:
+    """One control GET straight to the variant's receiver, never through the collector.
+
+    The receiver logs it as ``/v1/control/<case>`` with this run_id and answers 200
+    only after storing it. Returns "sent" or a fixed code; nothing else is reported.
+    """
+    try:
+        base = normalize_base(config.bases[control_base_key(case_id, variant)], config.allow_loopback_http)
+    except (KeyError, ValueError):
+        return "receiver_control_not_configured"
+    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+        return "receiver_control_not_configured"
+    try:
+        context = ssl.create_default_context(cafile=certifi.where())
+        if config.ca_file is not None:
+            context.load_verify_locations(cafile=str(config.ca_file))
+        async with asyncio.timeout(CONTROL_TIMEOUT_S):
+            async with httpx.AsyncClient(verify=context, follow_redirects=False, trust_env=False,
+                                         timeout=CONTROL_TIMEOUT_S) as client:
+                response = await client.get(f"{base}v1/control/{case_id}", params={"run_id": run_id})
+    except (httpx.HTTPError, OSError, ssl.SSLError, TimeoutError):
+        return "receiver_control_failed"
+    return "sent" if response.status_code == 200 else "receiver_control_rejected"
+
+
+SEND_CONTROL = send_receiver_control  # adapter seam; tests replace it
+
+
 async def observe(case: CaseSpec, variant: str, config: RuntimeConfig, run_id: str) -> Observation:
     obs = Observation(run_id=run_id, started_at=_now())
     try:
         await _route(case, variant, config, obs)
+        if obs.actions and not obs.preblocked and "receiver_observed" in _required(case, variant):
+            # Inside the trial window: prove the receiver log is live for this run_id.
+            obs.notes["receiver_control"] = await SEND_CONTROL(config, case.id, variant, run_id)
     finally:
         obs.ended_at = _now()
     return obs
@@ -592,11 +670,14 @@ def _overlaps(admin: Evidence, obs: Observation) -> bool:
 
 def _receiver_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evidence | None,
                     config: RuntimeConfig, notes: dict):
-    """``receiver_observed`` read by the runner from the receiver logs: (facts, block reason).
+    """``receiver_observed`` and ``receiver_control_ok`` read from the receiver logs: (facts, block).
 
     Events are bound to this variant's unguessable run_id and to the trial window:
-    the runner's own window when it acted, else the administrator's record. A
-    missing or unreadable log, or a late, early or foreign event, proves nothing.
+    the runner's own window when it acted, else the administrator's record. The logs
+    count only when they hold this trial's control event (``/v1/control/<case>``)
+    inside that window; an empty, stale or foreign log is ``receiver_log_coverage_unproven``.
+    The control itself is never an observed request. A missing or unreadable log, or a
+    late, early or foreign request event, proves nothing.
     """
     if "receiver_observed" not in _required(case, variant):
         return None, None
@@ -617,11 +698,16 @@ def _receiver_facts(case: CaseSpec, variant: str, obs: Observation, admin: Evide
     facts = {"variant": variant}
     if admin is not None and CLOCK_FACT in admin.facts:
         facts[CLOCK_FACT] = admin.facts[CLOCK_FACT]
-    observed = receiver_observed(Evidence(obs.run_id, case.id, start, end, facts), events)
+    trial = Evidence(obs.run_id, case.id, start, end, facts)
+    controls = tuple(event for event in events if is_control_event(event))
+    if receiver_observed(trial, controls) is not True:
+        return None, "receiver_log_coverage_unproven"
+    requests = tuple(event for event in events if not is_control_event(event))
+    observed = receiver_observed(trial, requests)
     if observed is None:
         return None, "receiver_evidence_inconclusive"
-    notes["receiver_events"] = len(events)
-    return {"receiver_observed": observed}, None
+    notes["receiver_events"] = len(requests)
+    return {"receiver_observed": observed, "receiver_control_ok": True}, None
 
 
 def _followup_check(admin: Evidence, obs: Observation, config: RuntimeConfig) -> Outcome:
@@ -629,7 +715,7 @@ def _followup_check(admin: Evidence, obs: Observation, config: RuntimeConfig) ->
 
     Its stored report must be in evidence_dir as ``isolation-report-<id>.json``
     (the name ``run`` writes), carry that run_id and the canonical manifest hash,
-    start after the replacement record's window start and after this run, and
+    start after the replacement record's window ended and after this run, and
     show every variant of REPLACEMENT_RETESTS passed. Otherwise blocked.
     """
     from .report import load_report, manifest_canonical
@@ -653,7 +739,7 @@ def _followup_check(admin: Evidence, obs: Observation, config: RuntimeConfig) ->
         return result("blocked", "followup_not_canonical")
     try:
         started = parse_utc(metadata.get("started_at"))
-        later = started >= parse_utc(admin.started_at) and started > parse_utc(obs.started_at)
+        later = started > parse_utc(admin.ended_at) and started > parse_utc(obs.started_at)
     except EvidenceUnavailable:
         later = False
     if not later:

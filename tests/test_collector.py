@@ -512,3 +512,11 @@ def test_status_code_outside_http_range_is_malformed(configured_collector, statu
 def test_status_code_inside_http_range_or_absent_is_accepted(configured_collector, status):
     page = invoke(configured_collector, lambda request: raw_response(page_payload(status_code=status)))
     assert page.status_code == status and page.input_url == INPUT
+
+
+def test_too_many_requests_is_a_rate_limit_signal_and_5xx_stays_unavailable(configured_collector):
+    limited = collection_error(configured_collector, lambda request: raw_response(status=429, raw=b"synthetic-body"))
+    unavailable = collection_error(configured_collector, lambda request: raw_response(status=503))
+    other = collection_error(configured_collector, lambda request: raw_response(status=418))
+    assert (limited.code, unavailable.code, other.code) == (
+        "collector_rate_limited", "collector_unavailable", "unexpected_status")

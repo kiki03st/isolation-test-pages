@@ -31,6 +31,9 @@ _RECORD_FIELDS = {"run_id", "case_id", "started_at", "ended_at", "facts", "refer
 # [] ...) are rejected and so is every name that is not listed here, which keeps
 # raw secrets and ad-hoc keys out of results.
 BOOLEAN_FACTS = frozenset({
+    # receiver_observed and receiver_control_ok are derived by the runner from the
+    # receiver log (its /v1/control/<case> event); an administrator value of either
+    # can only agree with the runner's or conflict with it, never supply it.
     "positive_control_ok", "receiver_control_ok", "request_blocked", "receiver_observed",
     "firewall_drop_observed", "remote_job_terminated", "recovery_ok", "caps_ok",
     "sandbox_ok", "readonly_ok", "mounts_ok", "environment_names_ok", "digest_ok",

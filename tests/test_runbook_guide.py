@@ -24,7 +24,7 @@ def test_every_required_fact_is_code_emitted_or_in_the_guide():
     for case in load_cases(CANONICAL_MANIFEST):
         for variant in case.variants:
             for name in _required(case, variant):
-                if name not in code_facts(case.id) and name not in rows:
+                if name not in code_facts(case.id, variant) and name not in rows:
                     missing.append(f"{case.id}/{variant}:{name}")
     assert missing == []
 
@@ -79,3 +79,116 @@ def test_declared_probe_facts_cover_what_the_probe_writes(monkeypatch):
     monkeypatch.setattr(os, "getuid", lambda: 1000, raising=False)
     facts = host_probes.collect_host_facts(boundary="container")
     assert set(facts) <= PROBE_FACTS
+
+
+# --- residual #9: a fact is "code-made" for a case only if code really emits it there ----
+
+_ALL_BASES = ("pages", "http_fixture", "forbidden_receiver", "private", "loopback", "link_local",
+              "main_public", "isolation_public", "shared_ip_host", "same_host_path")
+
+
+def _ai_facts(case_id):
+    """What the AI adapter records per case (adapters/ai.py): analysis, plus per-case extras."""
+    facts = {"analysis": True}
+    if case_id == "ANA-08":
+        facts["fabricated_evidence_rejected"] = True
+    if case_id == "INT-04":
+        facts["fallback_ok"] = True
+    if case_id == "LIM-04":
+        facts.update(boundary_offsets=[-1, 0, 1], boundary_limit=1, boundary_results_ok=True)
+    return facts
+
+
+def _emitted(case, variant, tmp_path, monkeypatch):
+    """Every fact the runner path records for one variant when every adapter succeeds."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from isolation_tests import runner
+    from isolation_tests.config import DEFAULT_LIMITS
+    from isolation_tests.model import CollectedPage, Evidence, Outcome, RuntimeConfig
+    from isolation_tests.receiver import RECEIVER_CASES, write_receiver_event
+
+    evidence = tmp_path / f"evidence-{case.id}-{variant}"
+    evidence.mkdir()
+    ca = tmp_path / "ca.pem"
+    ca.write_text("synthetic", encoding="utf-8")
+    caps = {name for c in runner._canonical().values() for name in c.required_capabilities}
+    for c in runner._canonical().values():
+        for v in c.variants:
+            caps |= set(runner._contract(c, v).get("required_capabilities", ()))
+    monkeypatch.setenv("GUIDE_TOKEN", "synthetic-guide-token")
+    config = RuntimeConfig(
+        bases={key: f"https://{key.replace('_', '-')}.example.invalid/" for key in _ALL_BASES},
+        collector_url="https://collector.example.invalid/collect", token_env="GUIDE_TOKEN",
+        ca_file=ca, limits={**DEFAULT_LIMITS, "collector_concurrency": 3},
+        capabilities=frozenset(caps), evidence_dir=evidence, backend_contract=None)
+
+    def now(offset=0):
+        return (datetime.now(timezone.utc) + timedelta(seconds=offset)).isoformat()
+
+    def control(case_id, run_id):
+        write_receiver_event(evidence / "receiver-guide.jsonl", case_id=case_id, run_id=run_id,
+                             method="GET", fixed_path=f"/v1/control/{case_id}", bytes_sent=2, at=now())
+
+    async def collect(config, url, token_mode="valid"):
+        return CollectedPage(url, url, (), 200, "text/html", "<title>수집 기준</title>배송 상태: 배송 중",
+                             "수집 기준", 10, ())
+
+    async def analyze(case, variant, page, client=None):
+        return Outcome(case.id, variant, "passed", "analysis_expectations_met",
+                       {"verdict": "same", "accepted_codes": [], "failure_codes": ["llm_timeout"],
+                        "facts": _ai_facts(case.id)})
+
+    async def backend(case, config, run_id):
+        return Outcome(case.id, "x", "passed", "backend_result_linked", {"first_response_deadline_ok": True})
+
+    async def send(config, case_id, variant, run_id):
+        control(case_id, run_id)
+        return "sent"
+
+    for name, fake in (("COLLECT", collect), ("ANALYZE", analyze), ("PROBE_BACKEND", backend),
+                       ("SEND_CONTROL", send)):
+        monkeypatch.setattr(runner, name, fake, raising=False)
+    run_id = runner.new_run_id()
+    obs = asyncio.run(runner.observe(case, variant, config, run_id))
+    admin = None
+    if not obs.actions:  # evidence-only: the administrator sends the control in their window
+        admin = Evidence(run_id, case.id, now(-5).replace("+00:00", "Z"), now(60).replace("+00:00", "Z"),
+                         {"variant": variant})
+        if case.id in RECEIVER_CASES:
+            control(case.id, run_id)
+    receiver, _ = runner._receiver_facts(case, variant, obs, admin, config, {})
+    return set(obs.facts) | set(receiver or {})
+
+
+def test_code_made_facts_are_really_emitted_for_every_case_that_requires_them(tmp_path, monkeypatch):
+    from isolation_tests.manifest import load_cases
+    from isolation_tests.runner import CANONICAL_MANIFEST, PROBE_CASES, _required, code_facts
+
+    missing = []
+    for case in load_cases(CANONICAL_MANIFEST):
+        if case.id in PROBE_CASES:  # host-probe output; see the probe test below
+            continue
+        for variant in case.variants:
+            claimed = code_facts(case.id, variant) & _required(case, variant)
+            for name in sorted(claimed - _emitted(case, variant, tmp_path, monkeypatch)):
+                missing.append(f"{case.id}/{variant}:{name}")
+    assert missing == []
+
+
+def test_lim03_limit_exceeded_confirmed_is_an_admin_fact_in_the_guide():
+    from isolation_tests.runner import code_facts
+
+    assert "limit_exceeded_confirmed" not in code_facts("LIM-03")
+    assert "limit_exceeded_confirmed" in code_facts("LIM-06")
+    assert re.search(r"LIM-03 \(large length-small length-large gzip\)", _guide_rows()["limit_exceeded_confirmed"])
+
+
+def test_guide_table_rows_have_exactly_five_cells():
+    text = RUNBOOK.read_text(encoding="utf-8").split("### 8-3.", 1)[1]
+    rows = [line for line in text.splitlines() if line.startswith("| `")]
+    assert rows
+    for row in rows:
+        cells = re.split(r"(?<!\\)\|", row.strip())[1:-1]  # an escaped \| stays inside its cell
+        assert len(cells) == 5, row

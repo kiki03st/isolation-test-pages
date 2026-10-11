@@ -26,7 +26,7 @@ from .fixtures import (
     LIMIT_BASES, MAX_FIXTURE_BYTES, NET_VARIANTS, SAMPLE_BYTES, boundary_html, bulk_body,
     render_http, render_network, render_resource, render_static,
 )
-from .receiver import RECEIVER_CASES, RUN_ID, write_receiver_event
+from .receiver import CONTROL_PREFIX, RECEIVE_PREFIX, RECEIVER_CASES, RUN_ID, write_receiver_event
 from .targets import normalize_base
 
 
@@ -474,6 +474,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._static("/".join(segments[3:]))
         if segments[:3] == ["", "v1", "receive"] and len(segments) == 4:
             return self._receive(segments[3], parts.query)
+        if segments[:3] == ["", "v1", "control"] and len(segments) == 4:
+            return self._receive(segments[3], parts.query, control=True)
         if segments[:3] == ["", "v1", "cases"] and len(segments) == 5:
             return self._case(segments[3], segments[4], parts.query)
         return self._status(404)
@@ -512,18 +514,18 @@ class _Handler(BaseHTTPRequestHandler):
 
     do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _reject
 
-    def _receive(self, case_id, query):
+    def _receive(self, case_id, query, control=False):
         if case_id not in RECEIVER_CASES:
             return self._status(404)
         run_id = self._query(query)["run_id"]
         if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
             return self._status(400)
         # Record before answering so a 200 always means the event was stored.
-        if not self._record(case_id, run_id, len(_PROBE_BODY)):
+        if not self._record(case_id, run_id, len(_PROBE_BODY), control=control):
             return self._status(503)
         self._respond(_plan(200, _PROBE_BODY, _TEXT))
 
-    def _record(self, case_id, run_id, sent) -> bool:
+    def _record(self, case_id, run_id, sent, control=False) -> bool:
         """Store the event; False only when a log is configured but the write failed."""
         log_path = self.server.fixture_config.log_path
         if (log_path is None or case_id not in RECEIVER_CASES
@@ -533,7 +535,7 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             write_receiver_event(
                 log_path, case_id=case_id, run_id=run_id, method=self.command,
-                fixed_path=f"/v1/receive/{case_id}", bytes_sent=sent,
+                fixed_path=(CONTROL_PREFIX if control else RECEIVE_PREFIX) + case_id, bytes_sent=sent,
                 at=datetime.now(timezone.utc).isoformat(),
             )
         except OSError as error:

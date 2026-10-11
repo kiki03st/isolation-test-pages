@@ -301,3 +301,77 @@ def test_get_with_body_closes_connection(fixture_server):
         while chunk := sock.recv(4096):
             data += chunk
     assert b"connection: close" in data.lower()
+
+
+# --- residual #1: a control event proves the log was live for the trial ------------
+
+def test_control_route_records_a_distinct_control_event(server_base, receiver_log):
+    from isolation_tests.receiver import is_control_event, read_receiver_events
+
+    response = httpx.get(server_base + "/v1/control/NET-01?run_id=run-ctl", trust_env=False)
+    assert response.status_code == 200
+    event, = _events(receiver_log)
+    assert set(event) == EVENT_FIELDS
+    assert (event["case_id"], event["run_id"], event["path"]) == ("NET-01", "run-ctl", "/v1/control/NET-01")
+    stored, = read_receiver_events(receiver_log, "run-ctl")
+    assert is_control_event(stored)
+    assert not is_control_event(_event())
+
+
+def test_control_route_accepts_only_get_for_receiver_cases(server_base, receiver_log):
+    assert httpx.get(server_base + "/v1/control/COL-01?run_id=run-ctl", trust_env=False).status_code == 404
+    assert httpx.get(server_base + "/v1/control/NET-01", trust_env=False).status_code == 400
+    assert httpx.post(server_base + "/v1/control/NET-01?run_id=run-ctl", trust_env=False).status_code == 405
+    # A completed request afterwards: nothing above was logged, least of all as a control.
+    httpx.get(server_base + "/v1/receive/NET-01?run_id=run-after", trust_env=False)
+    event, = _events(receiver_log)
+    assert event["path"] == "/v1/receive/NET-01"
+
+
+def test_reader_rejects_a_control_path_of_another_case(tmp_path):
+    from isolation_tests.receiver import read_receiver_events
+
+    path = tmp_path / "receiver.jsonl"
+    _write_jsonl(path, [_event(path="/v1/control/NET-02")])
+    with pytest.raises(ValueError):
+        read_receiver_events(path, "run-safe")
+
+
+def _control_config(bases):
+    from isolation_tests.model import RuntimeConfig
+
+    return RuntimeConfig(bases=bases, collector_url=None, token_env=None, ca_file=None, limits={},
+                         capabilities=frozenset(), evidence_dir=None, backend_contract=None,
+                         allow_loopback_http=True)
+
+
+def test_runner_control_reaches_the_variants_receiver_and_is_logged(fixture_server_factory):
+    import asyncio
+
+    from isolation_tests.receiver import is_control_event, read_receiver_events
+    from isolation_tests.runner import send_receiver_control
+
+    forbidden, private = fixture_server_factory(), fixture_server_factory()
+    config = _control_config({"forbidden_receiver": forbidden.base + "/", "private": private.base + "/"})
+    assert asyncio.run(send_receiver_control(config, "NET-01", "img", "run-ctl-a")) == "sent"
+    assert asyncio.run(send_receiver_control(config, "NET-03", "private", "run-ctl-b")) == "sent"
+    first, = read_receiver_events(forbidden.log_path, "run-ctl-a")
+    second, = read_receiver_events(private.log_path, "run-ctl-b")
+    assert is_control_event(first) and first["case_id"] == "NET-01"
+    assert is_control_event(second) and second["case_id"] == "NET-03"
+    assert read_receiver_events(forbidden.log_path, "run-ctl-b") == ()
+
+
+def test_runner_control_without_a_receiver_url_or_receiver_is_not_sent(fixture_server_factory):
+    import asyncio
+    import socket
+
+    from isolation_tests.runner import send_receiver_control
+
+    assert asyncio.run(send_receiver_control(_control_config({}), "NET-01", "img", "run-ctl-c")) \
+        == "receiver_control_not_configured"
+    with socket.socket() as probe:  # a loopback port with no listener
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    down = _control_config({"forbidden_receiver": f"http://127.0.0.1:{port}/"})
+    assert asyncio.run(send_receiver_control(down, "NET-01", "img", "run-ctl-d")) == "receiver_control_failed"

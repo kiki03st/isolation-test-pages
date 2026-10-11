@@ -123,6 +123,44 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+@pytest.fixture(autouse=True)
+def receiver_controls(monkeypatch):
+    """No test reaches a real receiver: control sends are recorded and never logged."""
+    from isolation_tests import runner
+
+    sent = []
+
+    async def unsent(config, case_id, variant, run_id):
+        sent.append((case_id, variant, run_id))
+        return "receiver_control_failed"
+
+    monkeypatch.setattr(runner, "SEND_CONTROL", unsent, raising=False)
+    return sent
+
+
+def _control_event(directory, case_id, run_id, at, name="receiver-forbidden.jsonl"):
+    """A control event as the receiver logs it for GET /v1/control/<case>."""
+    from isolation_tests.receiver import write_receiver_event
+
+    write_receiver_event(directory / name, case_id=case_id, run_id=run_id, method="GET",
+                         fixed_path=f"/v1/control/{case_id}", bytes_sent=2, at=at)
+
+
+def _live_receiver(monkeypatch, directory):
+    """A reachable receiver: every control the runner sends is logged at once."""
+    from isolation_tests import runner
+
+    sent = []
+
+    async def live(config, case_id, variant, run_id):
+        sent.append((case_id, variant, run_id))
+        _control_event(directory, case_id, run_id, _utc())
+        return "sent"
+
+    monkeypatch.setattr(runner, "SEND_CONTROL", live, raising=False)
+    return sent
+
+
 # --- evaluate: recovery -----------------------------------------------------------
 
 def test_recovery_failure_prevents_limit_pass(limit_case, recovered_facts):
@@ -221,9 +259,14 @@ def test_network_block_needs_runner_positive_control_and_admin_evidence(cases, c
     no_log = _run(runner.run_case(cases["NET-01"], "img", config, "run-net-b"))
     assert (no_log.status, no_log.reason) == ("blocked", "receiver_log_unavailable")
     _receiver_log(evidence_dir)
+    # An empty log proves nothing: the runner's control never reached it.
+    empty = _run(runner.run_case(cases["NET-01"], "img", config, "run-net-b"))
+    assert (empty.status, empty.reason) == ("blocked", "receiver_log_coverage_unproven")
+    _live_receiver(monkeypatch, evidence_dir)
     passed = _run(runner.run_case(cases["NET-01"], "img", config, "run-net-b"))
     assert passed.status == "passed", passed
     assert passed.details["observed_facts"]["receiver_observed"] is False
+    assert passed.details["observed_facts"]["receiver_control_ok"] is True
 
 
 def test_failed_positive_control_blocks_a_network_pass(cases, config, evidence_dir, monkeypatch):
@@ -261,7 +304,7 @@ def test_admin_evidence_contradicting_runner_observation_is_blocked(cases, confi
     _write_evidence(evidence_dir, "run-net-d", "NET-01", "img", {
         "positive_control_ok": True, "receiver_control_ok": True, "request_blocked": True,
         "receiver_observed": False})
-    _receiver_log(evidence_dir)
+    _live_receiver(monkeypatch, evidence_dir)
     outcome = _run(runner.run_case(cases["NET-01"], "img", config, "run-net-d"))
     assert (outcome.status, outcome.reason) == ("blocked", "evidence_conflict")
 
@@ -911,6 +954,7 @@ def test_report_subcommand_rejudges_with_evidence_added_after_the_run(config_fil
 
     monkeypatch.setenv("TEST_ONLY_TOKEN", "synthetic-runner-token")
     monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-01": lambda url: _page(url, "<p>n</p>", title=None)}))
+    _live_receiver(monkeypatch, evidence_dir)  # its log is copied from the receiver host after the run
     first = tmp_path / "first"
     runner.main(["run", "--manifest", str(MANIFEST), "--config", str(config_file),
                  "--output", str(first), "--case", "NET-01"])
@@ -920,7 +964,6 @@ def test_report_subcommand_rejudges_with_evidence_added_after_the_run(config_fil
     _write_evidence(evidence_dir, item["details"]["run_id"], "NET-01", "img", {
         "receiver_control_ok": True, "request_blocked": True, "receiver_observed": False},
         window=(item["details"]["started_at"], _from_now()[1]))
-    _receiver_log(evidence_dir)  # copied from the receiver host after the run
     source = next(first.glob("isolation-report-*.json"))
     second = tmp_path / "second"
     code = runner.main(["report", "--input", str(source), "--config", str(config_file),
@@ -1196,6 +1239,7 @@ def test_receiver_event_in_the_trial_window_fails_the_block(cases, config, evide
     from isolation_tests import runner
 
     monkeypatch.setattr(runner, "COLLECT", _reaching_collector(evidence_dir, "run-recv-a"))
+    _live_receiver(monkeypatch, evidence_dir)
     _net01_admin(evidence_dir, "run-recv-a")
     outcome = _run(runner.run_case(cases["NET-01"], "img", config, "run-recv-a"))
     assert (outcome.status, outcome.reason) == ("failed", "fact_mismatch:receiver_observed"), outcome
@@ -1205,6 +1249,7 @@ def test_admin_cannot_override_a_receiver_event_the_runner_read(cases, config, e
     from isolation_tests import runner
 
     monkeypatch.setattr(runner, "COLLECT", _reaching_collector(evidence_dir, "run-recv-b"))
+    _live_receiver(monkeypatch, evidence_dir)
     _net01_admin(evidence_dir, "run-recv-b", receiver_observed=False)
     outcome = _run(runner.run_case(cases["NET-01"], "img", config, "run-recv-b"))
     assert (outcome.status, outcome.reason) == ("blocked", "evidence_conflict")
@@ -1215,6 +1260,7 @@ def test_late_or_foreign_receiver_event_is_inconclusive(cases, config, evidence_
     from isolation_tests import runner
 
     monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-01": lambda url: _page(url, "<p>n</p>", title=None)}))
+    _live_receiver(monkeypatch, evidence_dir)
     _net01_admin(evidence_dir, "run-recv-c", receiver_observed=False)
     _receiver_log(evidence_dir, {"case_id": "NET-01", "run_id": "run-recv-c", "at": _utc(120)})
     late = _run(runner.run_case(cases["NET-01"], "img", config, "run-recv-c"))
@@ -1250,7 +1296,7 @@ def test_receiver_log_is_not_read_as_admin_evidence(cases, config, evidence_dir,
     ("NET-06", "websocket"), ("NET-07", "userinfo"),
 ])
 def test_every_receiver_case_requires_the_runner_read_receiver_log(cases, config, evidence_dir, monkeypatch,
-                                                                    case_id, variant):
+                                                                    case_id, variant, receiver_controls):
     from isolation_tests import runner
 
     monkeypatch.setattr(runner, "COLLECT", FakeCollector({"": lambda url: _page(url, "<p>n</p>", title=None)}))
@@ -1261,12 +1307,15 @@ def test_every_receiver_case_requires_the_runner_read_receiver_log(cases, config
     outcome = _run(runner.run_case(cases[case_id], variant, replace(config, capabilities=frozenset(caps)),
                                    "run-recv-g"))
     assert (outcome.status, outcome.reason) == ("blocked", "receiver_log_unavailable"), outcome
+    # The runner tried to prove the log live with one control for exactly this trial.
+    assert receiver_controls == [(case_id, variant, "run-recv-g")]
 
 
 def test_evidence_only_receiver_case_uses_the_admin_window(cases, config, evidence_dir):
     from isolation_tests import runner
 
     _receiver_log(evidence_dir, {"case_id": "NET-05", "run_id": "run-recv-h", "at": _utc(2)})
+    _control_event(evidence_dir, "NET-05", "run-recv-h", _utc(2))  # sent by the administrator
     _write_evidence(evidence_dir, "run-recv-h", "NET-05", "tcp", {
         "receiver_control_ok": True, "request_blocked": True, "receiver_observed": False,
         "positive_control_ok": True, "firewall_drop_observed": True, "probe_in_container": True,
@@ -1329,7 +1378,7 @@ def test_observed_overload_within_the_limit_confirms_enforcement(cases, config, 
     def answer(url):
         seen.append(url)
         if len(seen) == 1:
-            return CollectionError("collector_unavailable")
+            return CollectionError("collector_rate_limited")
         return _page(url, "<p>s</p>", title=None)
 
     _lim06_admin(evidence_dir, concurrency_limit_ok=True)
@@ -1346,6 +1395,32 @@ def test_inconclusive_concurrency_results_record_no_limit_fact(cases, config, ev
     outcome = _lim06(cases, config, monkeypatch, CollectionError("runner_timeout"))
     facts = outcome.details["observed_facts"]
     assert facts["limit_exceeded_confirmed"] is False and "concurrency_limit_ok" not in facts
+    # The administrator's concurrency_limit_ok: true cannot pass an inconclusive trial.
+    assert (outcome.status, outcome.reason) == ("blocked", "limit_observation_inconclusive")
+
+
+@pytest.mark.parametrize("first", ["collector_unavailable", "collector_timeout", "unexpected_status"])
+def test_one_non_overload_error_with_the_rest_collected_is_inconclusive(cases, config, evidence_dir,
+                                                                        monkeypatch, first):
+    from isolation_tests.adapters.collector import CollectionError
+
+    seen = []
+
+    def answer(url):
+        seen.append(url)
+        return CollectionError(first) if len(seen) == 1 else _page(url, "<p>s</p>", title=None)
+
+    _lim06_admin(evidence_dir, concurrency_limit_ok=True)
+    outcome = _lim06(cases, config, monkeypatch, answer)
+    assert outcome.details["observed_facts"]["limit_exceeded_confirmed"] is False
+    assert (outcome.status, outcome.reason) == ("blocked", "limit_observation_inconclusive")
+
+
+def test_overload_codes_count_429_but_not_a_bare_5xx():
+    from isolation_tests.runner import OVERLOAD_CODES
+
+    assert OVERLOAD_CODES == {"collector_rate_limited", "collector_busy", "concurrency_limit_exceeded",
+                              "queue_full"}
 
 
 # --- final review #3: REC-01 needs the stored, later, passing follow-up report ------
@@ -1379,13 +1454,14 @@ def _followup_report(directory, *, run_id=FOLLOWUP, started=None, failing=None, 
     return target
 
 
-def _rec01(cases, config, evidence_dir, **facts):
+def _rec01(cases, config, evidence_dir, window=None, **facts):
     from isolation_tests import runner
 
+    # By default the replacement window ends (now+3 s) before the follow-up starts (now+5 s).
     _write_evidence(evidence_dir, "run-rec-f", "REC-01", "replacement", {
         "replacement_kind": "new_instance", "replacement_ok": True, "digest_ok": True,
         "credentials_rotated": True, "old_credentials_rejected": True, "recovery_ok": True,
-        "positive_control_ok": True, "followup_run_id": FOLLOWUP, **facts})
+        "positive_control_ok": True, "followup_run_id": FOLLOWUP, **facts}, window=window or _from_now(3))
     caps = replace(config, capabilities=ALL_CAPS | {"replacement_evidence"})
     return _run(runner.run_case(cases["REC-01"], "replacement", caps, "run-rec-f"))
 
@@ -1412,7 +1488,91 @@ def test_replacement_without_a_valid_followup_is_blocked(cases, config, evidence
     assert (outcome.status, outcome.reason) == ("blocked", reason), outcome
 
 
+def test_followup_started_inside_the_replacement_window_is_not_accepted(cases, config, evidence_dir):
+    _followup_report(evidence_dir)  # starts at now+5 s
+    outcome = _rec01(cases, config, evidence_dir, window=_from_now(3600))
+    assert (outcome.status, outcome.reason) == ("blocked", "followup_not_later"), outcome
+
+
 def test_unreadable_followup_report_is_blocked(cases, config, evidence_dir):
     (evidence_dir / f"isolation-report-{FOLLOWUP}.json").write_text("{not json", encoding="utf-8")
     outcome = _rec01(cases, config, evidence_dir)
     assert (outcome.status, outcome.reason) == ("blocked", "followup_report_unreadable")
+
+
+# --- residual #1: the receiver log must be proven live for this trial ---------------
+
+def _net01_trial(cases, config, evidence_dir, monkeypatch, run_id, **facts):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NET-01": lambda url: _page(url, "<p>n</p>", title=None)}))
+    _net01_admin(evidence_dir, run_id, receiver_observed=False, **facts)
+    return _run(runner.run_case(cases["NET-01"], "img", config, run_id))
+
+
+@pytest.mark.parametrize("log", ["empty", "stale", "foreign-run", "foreign-case"])
+def test_receiver_log_without_this_trials_control_is_coverage_unproven(cases, config, evidence_dir,
+                                                                       monkeypatch, log):
+    (evidence_dir / "receiver-forbidden.jsonl").touch()
+    if log == "stale":
+        _control_event(evidence_dir, "NET-01", "run-cov-a", _utc(-120))
+    elif log == "foreign-run":
+        _control_event(evidence_dir, "NET-01", "run-cov-other", _utc())
+    elif log == "foreign-case":
+        _control_event(evidence_dir, "NET-02", "run-cov-a", _utc())
+    # The administrator's receiver_control_ok: true cannot stand in for the logged control.
+    outcome = _net01_trial(cases, config, evidence_dir, monkeypatch, "run-cov-a")
+    assert (outcome.status, outcome.reason) == ("blocked", "receiver_log_coverage_unproven"), outcome
+
+
+def test_admin_receiver_control_disagreeing_with_the_log_is_a_conflict(cases, config, evidence_dir, monkeypatch):
+    _live_receiver(monkeypatch, evidence_dir)
+    outcome = _net01_trial(cases, config, evidence_dir, monkeypatch, "run-cov-b", receiver_control_ok=False)
+    assert (outcome.status, outcome.reason) == ("blocked", "evidence_conflict")
+    assert outcome.details["conflict"] == "receiver_control_ok"
+
+
+def test_logged_control_alone_is_never_an_observed_request(cases, config, evidence_dir, monkeypatch):
+    sent = _live_receiver(monkeypatch, evidence_dir)
+    outcome = _net01_trial(cases, config, evidence_dir, monkeypatch, "run-cov-c")
+    assert outcome.status == "passed", outcome
+    assert sent == [("NET-01", "img", "run-cov-c")]
+    facts = outcome.details["observed_facts"]
+    assert (facts["receiver_observed"], facts["receiver_control_ok"]) == (False, True)
+
+
+def test_runner_sends_no_receiver_control_for_other_cases(cases, config, monkeypatch, receiver_controls):
+    from isolation_tests import runner
+
+    monkeypatch.setattr(runner, "COLLECT", FakeCollector({"NAV-02": lambda url: _page(url)}))
+    _run(runner.run_case(cases["NAV-02"], "hops-1", config, "run-cov-d"))
+    assert receiver_controls == []
+
+
+def _net05(cases, config, evidence_dir, run_id):
+    from isolation_tests import runner
+
+    _write_evidence(evidence_dir, run_id, "NET-05", "tcp", {
+        "request_blocked": True, "receiver_observed": False, "positive_control_ok": True,
+        "firewall_drop_observed": True, "probe_in_container": True, "boundary": "container",
+        "evidence_source": "observed"})
+    return _run(runner.run_case(cases["NET-05"], "tcp", replace(config, capabilities=ALL_CAPS | {"tcp_probe"}),
+                                run_id))
+
+
+@pytest.mark.parametrize("control_at,expected", [
+    (None, ("blocked", "receiver_log_coverage_unproven")),
+    (-60, ("blocked", "receiver_log_coverage_unproven")),  # before the administrator's window
+    (2, ("passed", None)),
+])
+def test_evidence_only_receiver_case_needs_the_control_in_the_admin_window(cases, config, evidence_dir,
+                                                                           control_at, expected):
+    (evidence_dir / "receiver-forbidden.jsonl").touch()
+    if control_at is not None:
+        _control_event(evidence_dir, "NET-05", "run-cov-e", _utc(control_at))
+    outcome = _net05(cases, config, evidence_dir, "run-cov-e")
+    assert outcome.status == expected[0], outcome
+    if expected[1]:
+        assert outcome.reason == expected[1]
+    else:
+        assert outcome.details["observed_facts"]["receiver_control_ok"] is True
