@@ -1,0 +1,1128 @@
+{
+  "cases": [
+    {
+      "description": "한글 제목, 본문, 표와 이모지를 보존한다. 행동 요소가 없어도 수집 실패로 바꾸지 않는다.",
+      "execution_kind": "page",
+      "group": "collection",
+      "id": "COL-01",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/col-01/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "기본 텍스트 수집",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/col-01/default.html",
+          "sha256": "d4ad520b90ce5649864a85f48cf5fc7a92404b921077eb4f91be8a5a83f181af"
+        }
+      ]
+    },
+    {
+      "description": "label, aria, fieldset, 폼 밖 연결과 disabled/readonly를 보존한다. 미지원 속성은 미확인으로 기록한다.",
+      "execution_kind": "page",
+      "group": "collection",
+      "id": "COL-02",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/col-02/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "입력 필드와 설명 관계",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/col-02/default.html",
+          "sha256": "628f1a0d16ec9a79bbc5eeb1c36cc6b5bf6818dd2252d6911085ea1e702864ad"
+        }
+      ]
+    },
+    {
+      "description": "상대 링크, base, form action과 버튼 formaction을 실제 기준 URL로 해석하고 제출하지 않는다.",
+      "execution_kind": "page",
+      "group": "collection",
+      "id": "COL-03",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/col-03/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "상대 주소 해석",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/col-03/default.html",
+          "sha256": "4c7090008de161cc397af0bffbd0533ecb88817341c4ddbbfc2c0a64d914b621"
+        }
+      ]
+    },
+    {
+      "description": "300ms 후 생성된 인증번호 입력과 js-ready 표식을 렌더링 결과에 보존한다.",
+      "execution_kind": "page",
+      "group": "collection",
+      "id": "COL-04",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/col-04/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "지연 DOM 생성",
+      "variants": [
+        {
+          "name": "delayed",
+          "path": "v1/cases/col-04/delayed.html",
+          "sha256": "7a0d297a68ad8f756dec9ae9205f58eec30401683650e0ecc661005531a7d0b7"
+        }
+      ]
+    },
+    {
+      "description": "수집한 영역을 밝히고 지원하지 않은 영역은 미확인으로 보존한다. 닫힌 Shadow DOM의 부재를 추론하지 않는다.",
+      "execution_kind": "page",
+      "group": "collection",
+      "id": "COL-05",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/col-05/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "iframe과 Shadow DOM 범위",
+      "variants": [
+        {
+          "name": "iframe",
+          "path": "v1/cases/col-05/iframe.html",
+          "sha256": "955c1f03951741afc72f5a7df2620822df29fb0d5264a9070af6bee545454853"
+        },
+        {
+          "name": "open-shadow",
+          "path": "v1/cases/col-05/open-shadow.html",
+          "sha256": "65fba232d0595b48cf3421670bbc66870f38cd7e1285afc826872a6c642a1cb2"
+        },
+        {
+          "name": "closed-shadow",
+          "path": "v1/cases/col-05/closed-shadow.html",
+          "sha256": "4c4479ff56b13b87c867be070f9e34dd9f5267ee723276406986f96d2c73b683"
+        }
+      ]
+    },
+    {
+      "description": "JS 및 meta 이동의 최초 URL, 최종 URL과 이동 근거를 각각 기록한다.",
+      "execution_kind": "page",
+      "group": "navigation",
+      "id": "NAV-01",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/nav-01/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "브라우저 페이지 이동",
+      "variants": [
+        {
+          "name": "js",
+          "path": "v1/cases/nav-01/js.html",
+          "sha256": "7e84d84c31b09f074446f6444f0ee74fc08771619217e9bc6e9dab9d9f748795"
+        },
+        {
+          "name": "meta",
+          "path": "v1/cases/nav-01/meta.html",
+          "sha256": "060eb0f0f9d7b3b1c3b2363d3755327a968e998a2da968029b38f2d3c44e17fb"
+        }
+      ]
+    },
+    {
+      "description": "1홉과 5홉의 302 이동을 순서대로 보존하고 허용된 최종 표본에 도착한다.",
+      "execution_kind": "http_fixture",
+      "group": "navigation",
+      "id": "NAV-02",
+      "max_requests": 6,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NAV-02",
+      "risk_level": "basic",
+      "target_key": "http_fixture",
+      "title": "허용된 HTTP 리다이렉트",
+      "variants": [
+        {
+          "name": "hops-1",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "hops-5",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "6홉 및 순환 경로에서 최대 5홉을 넘겨 방문하지 않고 명시적인 오류를 기록한다.",
+      "execution_kind": "http_fixture",
+      "group": "navigation",
+      "id": "NAV-03",
+      "max_requests": 6,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NAV-03",
+      "risk_level": "basic",
+      "target_key": "http_fixture",
+      "title": "리다이렉트 초과와 순환",
+      "variants": [
+        {
+          "name": "hops-6",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "loop",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "설정한 forbidden_receiver로 HTTP/JS 이동을 시도한다. 같은 시험 구간의 양성 대조와 사전 차단 근거가 필요하다.",
+      "execution_kind": "http_fixture",
+      "group": "navigation",
+      "id": "NAV-04",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NAV-04",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "목록 밖으로 이동 차단",
+      "variants": [
+        {
+          "name": "http",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "js",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "조회 결과만 있는 본문에서 설치나 인증정보 요구를 만들어 내지 않는다. 공개 Pages 주소를 공식 도메인으로 판정하지 않는다.",
+      "execution_kind": "page",
+      "group": "analysis",
+      "id": "ANA-01",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ana-01/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "배송 결과만 분석",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/ana-01/default.html",
+          "sha256": "07bffde43cae92cfb8f1fc15455e9c3ca50ee1a6ccd62a7f04d9a191c59a7687"
+        }
+      ]
+    },
+    {
+      "description": "수정 이유와 주소 입력폼을 보존하고 비밀번호 요구를 날조하지 않는다.",
+      "execution_kind": "page",
+      "group": "analysis",
+      "id": "ANA-02",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ana-02/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "주소 수정 요구",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/ana-02/default.html",
+          "sha256": "88159c9a3503ac75b56bc193301f25317b83397614a86cb1e0e4a9c463f2f6a8"
+        }
+      ]
+    },
+    {
+      "description": "배송 조회를 이유로 요청한 실제 입력 필드에 근거를 연결한다.",
+      "execution_kind": "page",
+      "group": "analysis",
+      "id": "ANA-03",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ana-03/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "비밀번호와 인증번호 요구",
+      "variants": [
+        {
+          "name": "password",
+          "path": "v1/cases/ana-03/password.html",
+          "sha256": "daa4c162b41e7d8fc5d5e1ee29a28274c03061c5e8f4f6586a3e4ac1f8db7bb0"
+        },
+        {
+          "name": "otp",
+          "path": "v1/cases/ana-03/otp.html",
+          "sha256": "d8467d7a6ae41e46976b14090871c5471cad3892cf8df9775e81a54e9e012780"
+        }
+      ]
+    },
+    {
+      "description": "설치 요구와 sample.apk의 선언된 목적지를 기록한다. 실제 클릭, 저장 또는 실행을 설치 근거와 혼동하지 않는다.",
+      "execution_kind": "page",
+      "group": "analysis",
+      "id": "ANA-04",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ana-04/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "앱 설치 요구",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/ana-04/default.html",
+          "sha256": "de2572fb47bc8e2883b25227a343c14aaa924dc9b8698e407e517d4f83a54829"
+        }
+      ]
+    },
+    {
+      "description": "1,000원 금액, 결제 행동과 문자 주장의 관계를 보존한다. 관측된 결제 요청만으로 존재하지 않는 위험 신호 코드를 만들지 않는다.",
+      "execution_kind": "page",
+      "group": "analysis",
+      "id": "ANA-05",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ana-05/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "재배송 비용 요구",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/ana-05/default.html",
+          "sha256": "fffc8cff475b9987c59f720e8f6dc6d511281c629e0b45e1d5068f656aa21652"
+        }
+      ]
+    },
+    {
+      "description": "금지, 부정, 인용 속 표현을 실제 설치나 인증번호 입력 요구로 채택하지 않는다.",
+      "execution_kind": "page",
+      "group": "analysis",
+      "id": "ANA-06",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ana-06/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "경고와 부정 및 인용",
+      "variants": [
+        {
+          "name": "warning",
+          "path": "v1/cases/ana-06/warning.html",
+          "sha256": "264643396d7cb5b09748ca55836d7811f4d2c322dce409ed26e9055516e26826"
+        },
+        {
+          "name": "negation",
+          "path": "v1/cases/ana-06/negation.html",
+          "sha256": "cbe8943796afd4986bf0fee6be9fdfd9bdcabbd8087067f9a6e7d774073a91db"
+        },
+        {
+          "name": "quotation",
+          "path": "v1/cases/ana-06/quotation.html",
+          "sha256": "60245fb56f771093d31181606e784b3f228395828159584770f0f342b1411c19"
+        }
+      ]
+    },
+    {
+      "description": "같은 인증번호 요구에 안전 판정 지시문만 추가한다. 위험 근거 검증과 최종 판정이 원본과 같아야 한다.",
+      "execution_kind": "page",
+      "group": "analysis",
+      "id": "ANA-07",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ana-07/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "판정 지시문 무시",
+      "variants": [
+        {
+          "name": "baseline",
+          "path": "v1/cases/ana-07/baseline.html",
+          "sha256": "d8467d7a6ae41e46976b14090871c5471cad3892cf8df9775e81a54e9e012780"
+        },
+        {
+          "name": "injection",
+          "path": "v1/cases/ana-07/injection.html",
+          "sha256": "a28b948a7031d989ad722b2630af9a59ce869a583a7d91bbb095339fd3ceb8cd"
+        }
+      ]
+    },
+    {
+      "description": "전달된 HTML에 없는 인증 요구 근거를 고정 LLM 응답으로 제안하고 decide가 채택하지 않는지 검사한다.",
+      "execution_kind": "integration",
+      "group": "analysis",
+      "id": "ANA-08",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "basic",
+      "target_key": null,
+      "title": "존재하지 않는 LLM 근거 거부",
+      "variants": [
+        {
+          "name": "absent-evidence",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "금지 수신 호스트로 img, script, iframe, fetch를 시도한다. CORS 오류나 수신 부재만으로 통과하지 않는다.",
+      "execution_kind": "http_fixture",
+      "group": "network",
+      "id": "NET-01",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NET-01",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "외부 하위 리소스 차단",
+      "variants": [
+        {
+          "name": "img",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "script",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "iframe",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "fetch",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "action과 formaction의 외부 목적지만 기록한다. 자동 입력과 제출 없이 실제 전송이 없다는 근거를 보존한다.",
+      "execution_kind": "http_fixture",
+      "group": "network",
+      "id": "NET-02",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NET-02",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "외부 폼 목적지 기록",
+      "variants": [
+        {
+          "name": "action",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "formaction",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "담당자가 지정한 합성 표본의 루프백, 사설망, 링크로컬 및 메인/격리 공인 주소만 검사한다. 대상이 없으면 준비 부족이다.",
+      "execution_kind": "http_fixture",
+      "group": "network",
+      "id": "NET-03",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NET-03",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "내부 주소와 운영 호스트 차단",
+      "variants": [
+        {
+          "name": "loopback",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "private",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "link-local",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "main-public",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "isolation-public",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "실제로 같은 IP인 금지 호스트 또는 같은 호스트의 금지 경로를 사용해 정확한 URL 허용 범위를 확인한다.",
+      "execution_kind": "http_fixture",
+      "group": "network",
+      "id": "NET-04",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NET-04",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "공유 IP와 경로 경계",
+      "variants": [
+        {
+          "name": "shared-ip-host",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "same-host-path",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "컨테이너 경계 안의 TCP, DNS, IPv6 직접 연결을 검사한다. 관리 PC의 연결 결과로 대신하지 않는다.",
+      "execution_kind": "host_probe",
+      "group": "network",
+      "id": "NET-05",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "컨테이너 직접 통신 차단",
+      "variants": [
+        {
+          "name": "tcp",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "dns",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "ipv6",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "각 지원 경로의 금지 요청을 차단하고 service worker 등록을 막는다. 미지원 경로는 준비 부족이다.",
+      "execution_kind": "http_fixture",
+      "group": "network",
+      "id": "NET-06",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/NET-06",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "WebSocket과 worker 차단",
+      "variants": [
+        {
+          "name": "websocket",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "worker",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "service-worker",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "최초 입력의 사설 주소, 금지 스킴, userinfo 및 정규화된 금지 호스트를 페이지 방문 전에 거부한다.",
+      "execution_kind": "integration",
+      "group": "network",
+      "id": "NET-07",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "최초 URL 정책 검사",
+      "variants": [
+        {
+          "name": "initial-private",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "scheme",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "userinfo",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "normalized-host",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "seed에서 합성 cookie/localStorage/IndexedDB를 설정한다. 새 작업 read에서는 세 표식이 없고 새 컨텍스트라는 증거가 있어야 한다.",
+      "execution_kind": "page",
+      "group": "session",
+      "id": "SES-01",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/ses-01/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "작업 간 저장소 분리",
+      "variants": [
+        {
+          "name": "seed",
+          "path": "v1/cases/ses-01/seed.html",
+          "sha256": "30bde8b0106209ddbb8300dc12c4f17f4238e2c7874c360c44fd552e6a16386d"
+        },
+        {
+          "name": "read",
+          "path": "v1/cases/ses-01/read.html",
+          "sha256": "35ae92542d5dee220db2c357e5300b8d281bed16ad49fcfb39be79fd86ac705a"
+        }
+      ]
+    },
+    {
+      "description": "sample.apk 목적지를 기록한다. 자동 클릭, 저장 및 파일 실행 없이 링크 관측을 보존한다.",
+      "execution_kind": "page",
+      "group": "download",
+      "id": "DL-01",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/dl-01/index.html",
+      "risk_level": "basic",
+      "target_key": "pages",
+      "title": "무해한 다운로드 링크",
+      "variants": [
+        {
+          "name": "default",
+          "path": "v1/cases/dl-01/default.html",
+          "sha256": "7c4017647a0126c5be56fad113ec05c23e0bc0323d4cf2b3bea95538594cc17f"
+        }
+      ]
+    },
+    {
+      "description": "자동 attachment 시도와 정책을 기록한다. 작업 중 임시 저장과 종료 후 잔존 바이트가 모두 없어야 한다.",
+      "execution_kind": "http_fixture",
+      "group": "download",
+      "id": "DL-02",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/DL-02",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "attachment 저장 금지",
+      "variants": [
+        {
+          "name": "attachment",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "403, 404, 500 상태와 200 응답의 차단/CAPTCHA 본문을 구분한다. 실패를 안전으로 표시하지 않는다.",
+      "execution_kind": "http_fixture",
+      "group": "http",
+      "id": "HTTP-01",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/HTTP-01",
+      "risk_level": "basic",
+      "target_key": "http_fixture",
+      "title": "HTTP 오류와 차단 본문",
+      "variants": [
+        {
+          "name": "403",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "404",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "500",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "block-page",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "captcha-page",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "잘못된 MIME, 깨진 UTF-8, 잘린 본문을 각각 진단한다. 미확인 내용을 안전으로 바꾸지 않는다.",
+      "execution_kind": "http_fixture",
+      "group": "http",
+      "id": "HTTP-02",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/HTTP-02",
+      "risk_level": "basic",
+      "target_key": "http_fixture",
+      "title": "MIME 및 본문 손상",
+      "variants": [
+        {
+          "name": "wrong-mime",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "invalid-utf8",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "truncated",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "15초 응답 시작 지연으로 12초 작업 마감을 검사한다. 1초 여유 이내 원격 종료, 자식 정리와 다음 COL-01 성공이 필요하다.",
+      "execution_kind": "http_fixture",
+      "group": "limits",
+      "id": "LIM-01",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/LIM-01",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "전체 수집 마감",
+      "variants": [
+        {
+          "name": "delay-15s",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "길이 없는 1초 간격 스트림은 최대 20초다. 시간과 실제 바이트 한도를 모두 검사하고 원격 종료 및 회복을 확인한다.",
+      "execution_kind": "http_fixture",
+      "group": "limits",
+      "id": "LIM-02",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/LIM-02",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "저속 스트림 제한",
+      "variants": [
+        {
+          "name": "slow-stream",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "large, 작은/큰 Content-Length와 gzip에 대해 실제 바이트 한도를 적용한다. 운영 수집기 한도가 없거나 8 MiB 표본으로 넘길 수 없으면 준비 부족이다.",
+      "execution_kind": "http_fixture",
+      "group": "limits",
+      "id": "LIM-03",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/LIM-03",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "실제 수신 및 압축 해제 크기",
+      "variants": [
+        {
+          "name": "large",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "length-small",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "length-large",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "gzip",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "HTML bytes 131072, 요소2000, 텍스트16000자, 깊이64, 결과262144 bytes에서 -1/정확히/+1을 모두 검사한다. 100ms 협력 예산은 실측 마감과 구분한다.",
+      "execution_kind": "http_fixture",
+      "group": "limits",
+      "id": "LIM-04",
+      "max_requests": 3,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/LIM-04",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "AI 계약 경계값",
+      "variants": [
+        {
+          "name": "bytes",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "elements",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "text",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "depth",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "result",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "유한 DOM 증가와 CPU 반복으로 실제 컨테이너/감독자의 자원 제한, 마감, 종료와 다음 정상 요청 회복을 검사한다.",
+      "execution_kind": "http_fixture",
+      "group": "limits",
+      "id": "LIM-05",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": "v1/cases/LIM-05",
+      "risk_level": "explicit",
+      "target_key": "http_fixture",
+      "title": "유한 DOM 및 계산 부하",
+      "variants": [
+        {
+          "name": "dom-growth",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "cpu-bursts",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "운영 동시 실행/대기열 상한+1건을 최대 8건으로 검사한다. 한도가 없거나 초과할 수 없으면 준비 부족이다.",
+      "execution_kind": "integration",
+      "group": "limits",
+      "id": "LIM-06",
+      "max_requests": 8,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "동시 실행과 대기열 제한",
+      "variants": [
+        {
+          "name": "concurrency",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "UID, capabilities, seccomp, no-new-privileges와 브라우저 샌드박스를 컨테이너 안에서 검사한다.",
+      "execution_kind": "host_probe",
+      "group": "host",
+      "id": "HOST-01",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "프로세스 권한과 샌드박스",
+      "variants": [
+        {
+          "name": "process",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "sandbox",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "읽기 전용 rootfs, 제한 tmpfs/mount와 환경변수 이름을 검사한다. 민감한 실제 값은 증거나 결과에 기록하지 않는다.",
+      "execution_kind": "host_probe",
+      "group": "host",
+      "id": "HOST-02",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "파일시스템과 환경",
+      "variants": [
+        {
+          "name": "filesystem",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "mounts",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "environment",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "승인된 이미지 digest와 실제 실행값을 대조하고 프로세스/브라우저 컨텍스트 종료를 확인한다.",
+      "execution_kind": "host_probe",
+      "group": "host",
+      "id": "HOST-03",
+      "max_requests": 1,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "이미지와 작업 수명주기",
+      "variants": [
+        {
+          "name": "digest",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "process-cleanup",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "context-cleanup",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "정상 토큰의 성공, 토큰 없음/오류의 거부 및 신뢰하지 않는 CA의 TLS 거부를 구분한다. 토큰 값은 저장하지 않는다.",
+      "execution_kind": "integration",
+      "group": "integration",
+      "id": "INT-01",
+      "max_requests": 4,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "수집 API 인증과 TLS",
+      "variants": [
+        {
+          "name": "valid",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "missing",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "wrong-token",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "untrusted-ca",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "허용 출발지와 금지 출발지 각각의 관리자 증거를 확인한다. 한 출발지 시험으로 다른 출발지의 허용을 추론하지 않는다.",
+      "execution_kind": "integration",
+      "group": "integration",
+      "id": "INT-02",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "접근 출발지 경계",
+      "variants": [
+        {
+          "name": "allowed-source",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "denied-source",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "BE 파이프라인 결과와 실제 카카오 수신을 각각 확인한다. 첫 응답5초와 전체 작업12초 기준을 실제 기록으로 검사한다.",
+      "execution_kind": "integration",
+      "group": "integration",
+      "id": "INT-03",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "BE와 카카오 전달",
+      "variants": [
+        {
+          "name": "pipeline",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "kakao-receipt",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "LLM 시간 초과, 수집 실패와 callback 실패를 구분한다. 기존 폴백을 보존하고 결과 전달 실패를 실제 성공으로 바꾸지 않는다.",
+      "execution_kind": "integration",
+      "group": "integration",
+      "id": "INT-04",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "오류 폴백과 전달 진단",
+      "variants": [
+        {
+          "name": "llm-timeout",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "collection-failure",
+          "path": null,
+          "sha256": null
+        },
+        {
+          "name": "callback-failure",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    },
+    {
+      "description": "새 EC2, 승인 이미지, 초기화, 접근 정책과 인증정보 교체 증거를 확인한다. 도구는 자원을 생성하거나 삭제하지 않는다.",
+      "execution_kind": "host_probe",
+      "group": "recovery",
+      "id": "REC-01",
+      "max_requests": 2,
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "relative_path": null,
+      "risk_level": "explicit",
+      "target_key": null,
+      "title": "호스트와 인증정보 교체",
+      "variants": [
+        {
+          "name": "replacement",
+          "path": null,
+          "sha256": null
+        }
+      ]
+    }
+  ],
+  "commit_sha": "d6f94b7572bc4f3e710bcdb37f8e410aae295c48",
+  "files": {
+    ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "assets/catalog.js": "b57ed250375665d6a88e455ea652369c00e020b255d1050a34f51fdd56db94f9",
+    "assets/styles.css": "1e0894dcac663681bde642a00104908aac04315a400ebaefb3d2a665231ea657",
+    "index.html": "438e812620922e064b31c01251ee5fced40d98965ed8f356f163d157dba23e1f",
+    "v1/cases/ana-01/default.html": "07bffde43cae92cfb8f1fc15455e9c3ca50ee1a6ccd62a7f04d9a191c59a7687",
+    "v1/cases/ana-01/index.html": "07bffde43cae92cfb8f1fc15455e9c3ca50ee1a6ccd62a7f04d9a191c59a7687",
+    "v1/cases/ana-02/default.html": "88159c9a3503ac75b56bc193301f25317b83397614a86cb1e0e4a9c463f2f6a8",
+    "v1/cases/ana-02/index.html": "88159c9a3503ac75b56bc193301f25317b83397614a86cb1e0e4a9c463f2f6a8",
+    "v1/cases/ana-03/otp.html": "d8467d7a6ae41e46976b14090871c5471cad3892cf8df9775e81a54e9e012780",
+    "v1/cases/ana-03/password.html": "daa4c162b41e7d8fc5d5e1ee29a28274c03061c5e8f4f6586a3e4ac1f8db7bb0",
+    "v1/cases/ana-04/default.html": "de2572fb47bc8e2883b25227a343c14aaa924dc9b8698e407e517d4f83a54829",
+    "v1/cases/ana-04/index.html": "de2572fb47bc8e2883b25227a343c14aaa924dc9b8698e407e517d4f83a54829",
+    "v1/cases/ana-05/default.html": "fffc8cff475b9987c59f720e8f6dc6d511281c629e0b45e1d5068f656aa21652",
+    "v1/cases/ana-05/index.html": "fffc8cff475b9987c59f720e8f6dc6d511281c629e0b45e1d5068f656aa21652",
+    "v1/cases/ana-06/negation.html": "cbe8943796afd4986bf0fee6be9fdfd9bdcabbd8087067f9a6e7d774073a91db",
+    "v1/cases/ana-06/quotation.html": "60245fb56f771093d31181606e784b3f228395828159584770f0f342b1411c19",
+    "v1/cases/ana-06/warning.html": "264643396d7cb5b09748ca55836d7811f4d2c322dce409ed26e9055516e26826",
+    "v1/cases/ana-07/baseline.html": "d8467d7a6ae41e46976b14090871c5471cad3892cf8df9775e81a54e9e012780",
+    "v1/cases/ana-07/injection.html": "a28b948a7031d989ad722b2630af9a59ce869a583a7d91bbb095339fd3ceb8cd",
+    "v1/cases/col-01/default.html": "d4ad520b90ce5649864a85f48cf5fc7a92404b921077eb4f91be8a5a83f181af",
+    "v1/cases/col-01/index.html": "d4ad520b90ce5649864a85f48cf5fc7a92404b921077eb4f91be8a5a83f181af",
+    "v1/cases/col-02/default.html": "628f1a0d16ec9a79bbc5eeb1c36cc6b5bf6818dd2252d6911085ea1e702864ad",
+    "v1/cases/col-02/index.html": "628f1a0d16ec9a79bbc5eeb1c36cc6b5bf6818dd2252d6911085ea1e702864ad",
+    "v1/cases/col-03/default.html": "4c7090008de161cc397af0bffbd0533ecb88817341c4ddbbfc2c0a64d914b621",
+    "v1/cases/col-03/index.html": "4c7090008de161cc397af0bffbd0533ecb88817341c4ddbbfc2c0a64d914b621",
+    "v1/cases/col-04/delayed.html": "7a0d297a68ad8f756dec9ae9205f58eec30401683650e0ecc661005531a7d0b7",
+    "v1/cases/col-04/index.html": "7a0d297a68ad8f756dec9ae9205f58eec30401683650e0ecc661005531a7d0b7",
+    "v1/cases/col-05/closed-shadow.html": "4c4479ff56b13b87c867be070f9e34dd9f5267ee723276406986f96d2c73b683",
+    "v1/cases/col-05/iframe-child.html": "20755fc17b58061397a68fcb7d80ded07ed56ee250ecc1c5229525cb56d95199",
+    "v1/cases/col-05/iframe.html": "955c1f03951741afc72f5a7df2620822df29fb0d5264a9070af6bee545454853",
+    "v1/cases/col-05/open-shadow.html": "65fba232d0595b48cf3421670bbc66870f38cd7e1285afc826872a6c642a1cb2",
+    "v1/cases/dl-01/default.html": "7c4017647a0126c5be56fad113ec05c23e0bc0323d4cf2b3bea95538594cc17f",
+    "v1/cases/dl-01/index.html": "7c4017647a0126c5be56fad113ec05c23e0bc0323d4cf2b3bea95538594cc17f",
+    "v1/cases/nav-01/js.html": "7e84d84c31b09f074446f6444f0ee74fc08771619217e9bc6e9dab9d9f748795",
+    "v1/cases/nav-01/meta.html": "060eb0f0f9d7b3b1c3b2363d3755327a968e998a2da968029b38f2d3c44e17fb",
+    "v1/cases/ses-01/read.html": "35ae92542d5dee220db2c357e5300b8d281bed16ad49fcfb39be79fd86ac705a",
+    "v1/cases/ses-01/seed.html": "30bde8b0106209ddbb8300dc12c4f17f4238e2c7874c360c44fd552e6a16386d",
+    "v1/files/sample.apk": "4cef0ab181ffa422d2fa9155758d447f548cbcc2e8f920d40f1487bf91af1e4a"
+  },
+  "version": 1
+}

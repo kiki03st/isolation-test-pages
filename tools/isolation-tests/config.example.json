@@ -1,0 +1,17 @@
+{
+  "bases": {},
+  "collector_url": null,
+  "token_env": "ISOLATION_TEST_TOKEN",
+  "ca_file": null,
+  "limits": {
+    "collector_deadline_s": 12,
+    "deadline_grace_s": 1,
+    "max_redirects": 5,
+    "runner_response_bytes": 1048576,
+    "concurrency": 1
+  },
+  "capabilities": [],
+  "evidence_dir": null,
+  "backend_contract": null,
+  "allow_loopback_http": false
+}

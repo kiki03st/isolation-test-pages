@@ -1,0 +1,21 @@
+[project]
+name = "isolation-test-pages"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["httpx==0.28.1", "certifi>=2024.2.2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9", "playwright==1.63.0"]
+
+[project.scripts]
+isolation-tests = "isolation_tests.runner:main"
+isolation-fixtures = "isolation_tests.fixture_server:main"
+isolation-build-pages = "isolation_tests.build_pages:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["tools/isolation-tests"]
+include = ["isolation_tests*"]

@@ -1,0 +1,3429 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "COL-01",
+      "group": "collection",
+      "title": "기본 텍스트 수집",
+      "description": "한글 제목, 본문, 표와 이모지를 보존한다. 행동 요소가 없어도 수집 실패로 바꾸지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/col-01/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "collection": true
+              },
+              "required_text": [
+                "배송 상태: 배송 중",
+                "📦"
+              ],
+              "title": "수집 기준"
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "COL-02",
+      "group": "collection",
+      "title": "입력 필드와 설명 관계",
+      "description": "label, aria, fieldset, 폼 밖 연결과 disabled/readonly를 보존한다. 미지원 속성은 미확인으로 기록한다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/col-02/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "form_associations_ok": true,
+                "disabled_readonly_ok": true
+              },
+              "required_text": [
+                "배송지 주소",
+                "배송 메모"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "COL-03",
+      "group": "collection",
+      "title": "상대 주소 해석",
+      "description": "상대 링크, base, form action과 버튼 formaction을 실제 기준 URL로 해석하고 제출하지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/col-03/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "relative_targets_ok": true,
+                "forms_submitted": false
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "COL-04",
+      "group": "collection",
+      "title": "지연 DOM 생성",
+      "description": "300ms 후 생성된 인증번호 입력과 js-ready 표식을 렌더링 결과에 보존한다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/col-04/index.html",
+      "variants": [
+        "delayed"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "delayed": {
+            "inputs": {},
+            "assertions": {
+              "required_text": [
+                "동적 인증번호",
+                "js-ready"
+              ],
+              "required_facts": {
+                "collection": true,
+                "inspected_regions": [
+                  "document"
+                ]
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": [
+              "rendering"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "COL-05",
+      "group": "collection",
+      "title": "iframe과 Shadow DOM 범위",
+      "description": "수집한 영역을 밝히고 지원하지 않은 영역은 미확인으로 보존한다. 닫힌 Shadow DOM의 부재를 추론하지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/col-05/index.html",
+      "variants": [
+        "iframe",
+        "open-shadow",
+        "closed-shadow"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "iframe": {
+            "inputs": {},
+            "assertions": {
+              "required_text": [
+                "iframe-marker"
+              ],
+              "required_facts": {
+                "collection": true,
+                "inspected_regions": [
+                  "document",
+                  "iframe"
+                ]
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": [
+              "iframe_collection"
+            ]
+          },
+          "open-shadow": {
+            "inputs": {},
+            "assertions": {
+              "required_text": [
+                "open-shadow-marker"
+              ],
+              "required_facts": {
+                "collection": true,
+                "inspected_regions": [
+                  "document",
+                  "open_shadow"
+                ]
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": [
+              "open_shadow_collection"
+            ]
+          },
+          "closed-shadow": {
+            "inputs": {},
+            "assertions": {
+              "unknown_regions": [
+                "closed_shadow"
+              ],
+              "required_facts": {
+                "collection": true,
+                "unknown_regions": [
+                  "closed_shadow"
+                ]
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": [
+              "rendering"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "NAV-01",
+      "group": "navigation",
+      "title": "브라우저 페이지 이동",
+      "description": "JS 및 meta 이동의 최초 URL, 최종 URL과 이동 근거를 각각 기록한다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/nav-01/index.html",
+      "variants": [
+        "js",
+        "meta"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "js": {
+            "inputs": {},
+            "assertions": {
+              "final_path": "v1/cases/col-01/index.html",
+              "required_text": [
+                "배송 상태: 배송 중"
+              ],
+              "required_facts": {
+                "collection": true,
+                "navigation_kind": "js",
+                "navigation_chain_ok": true
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "meta": {
+            "inputs": {},
+            "assertions": {
+              "final_path": "v1/cases/col-01/index.html",
+              "required_text": [
+                "배송 상태: 배송 중"
+              ],
+              "required_facts": {
+                "collection": true,
+                "navigation_kind": "meta",
+                "navigation_chain_ok": true
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 2,
+      "recovery_case": null
+    },
+    {
+      "id": "NAV-02",
+      "group": "navigation",
+      "title": "허용된 HTTP 리다이렉트",
+      "description": "1홉과 5홉의 302 이동을 순서대로 보존하고 허용된 최종 표본에 도착한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NAV-02",
+      "variants": [
+        "hops-1",
+        "hops-5"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "hops-1": {
+            "inputs": {},
+            "assertions": {
+              "redirect_count": 1,
+              "max_redirects": 5,
+              "final_path": "v1/static/v1/cases/col-01/index.html",
+              "required_text": [
+                "배송 상태: 배송 중"
+              ],
+              "required_facts": {
+                "collection": true,
+                "navigation_chain_ok": true
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "hops-5": {
+            "inputs": {},
+            "assertions": {
+              "redirect_count": 5,
+              "max_redirects": 5,
+              "final_path": "v1/static/v1/cases/col-01/index.html",
+              "required_text": [
+                "배송 상태: 배송 중"
+              ],
+              "required_facts": {
+                "collection": true,
+                "navigation_chain_ok": true
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 6,
+      "recovery_case": null
+    },
+    {
+      "id": "NAV-03",
+      "group": "navigation",
+      "title": "리다이렉트 초과와 순환",
+      "description": "6홉 및 순환 경로에서 최대 5홉을 넘겨 방문하지 않고 명시적인 오류를 기록한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NAV-03",
+      "variants": [
+        "hops-6",
+        "loop"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "hops-6": {
+            "inputs": {},
+            "assertions": {
+              "max_redirects": 5,
+              "failure_codes": [
+                "redirect_limit"
+              ],
+              "required_facts": {
+                "collection": true,
+                "redirect_limit_ok": true
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "loop": {
+            "inputs": {},
+            "assertions": {
+              "max_redirects": 5,
+              "failure_codes": [
+                "redirect_loop"
+              ],
+              "required_facts": {
+                "collection": true,
+                "redirect_limit_ok": true
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 6,
+      "recovery_case": null
+    },
+    {
+      "id": "NAV-04",
+      "group": "navigation",
+      "title": "목록 밖으로 이동 차단",
+      "description": "설정한 forbidden_receiver로 HTTP/JS 이동을 시도한다. 같은 시험 구간의 양성 대조와 사전 차단 근거가 필요하다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NAV-04",
+      "variants": [
+        "http",
+        "js"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server",
+        "receiver_logs"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "http": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "js": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": [
+              "rendering"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "receiver_control_ok",
+        "request_blocked",
+        "receiver_observed"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-01",
+      "group": "analysis",
+      "title": "배송 결과만 분석",
+      "description": "조회 결과만 있는 본문에서 설치나 인증정보 요구를 만들어 내지 않는다. 공개 Pages 주소를 공식 도메인으로 판정하지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ana-01/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "배송 상태: 배송 중"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "default": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "install_prompt",
+              "credential_request",
+              "dangerous_permission",
+              "remote_control"
+            ],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-02",
+      "group": "analysis",
+      "title": "주소 수정 요구",
+      "description": "수정 이유와 주소 입력폼을 보존하고 비밀번호 요구를 날조하지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ana-02/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "배송지 주소를 수정해 주세요",
+                "주소 오류"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "default": {
+            "required_doubts": [
+              "주소 입력폼"
+            ],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "install_prompt",
+              "credential_request",
+              "dangerous_permission",
+              "remote_control"
+            ],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-03",
+      "group": "analysis",
+      "title": "비밀번호와 인증번호 요구",
+      "description": "배송 조회를 이유로 요청한 실제 입력 필드에 근거를 연결한다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ana-03/index.html",
+      "variants": [
+        "password",
+        "otp"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "password": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "비밀번호를 입력해 주세요"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "otp": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "인증번호를 입력해 주세요"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "password": {
+            "required_doubts": [
+              "로그인·인증 입력폼"
+            ],
+            "required_signal_codes": [
+              "credential_request"
+            ],
+            "forbidden_signal_codes": [],
+            "final_state": "smishing_suspected",
+            "reason_code": "risk_signal",
+            "mode": "fixed"
+          },
+          "otp": {
+            "required_doubts": [
+              "로그인·인증 입력폼"
+            ],
+            "required_signal_codes": [
+              "credential_request"
+            ],
+            "forbidden_signal_codes": [],
+            "final_state": "smishing_suspected",
+            "reason_code": "risk_signal",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-04",
+      "group": "analysis",
+      "title": "앱 설치 요구",
+      "description": "설치 요구와 sample.apk의 선언된 목적지를 기록한다. 실제 클릭, 저장 또는 실행을 설치 근거와 혼동하지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ana-04/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "배송 확인 앱을 설치해 주세요",
+                "sample.apk"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true,
+                "download_clicked": false,
+                "file_executed": false
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "default": {
+            "required_doubts": [
+              "앱 다운로드 링크"
+            ],
+            "required_signal_codes": [
+              "install_prompt"
+            ],
+            "forbidden_signal_codes": [],
+            "final_state": "smishing_suspected",
+            "reason_code": "risk_signal",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-05",
+      "group": "analysis",
+      "title": "재배송 비용 요구",
+      "description": "1,000원 금액, 결제 행동과 문자 주장의 관계를 보존한다. 관측된 결제 요청만으로 존재하지 않는 위험 신호 코드를 만들지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ana-05/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "재배송 비용 1,000원",
+                "결제해 주세요"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true,
+                "payment_amount_krw": 1000,
+                "payment_request_observed": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "default": {
+            "required_doubts": [
+              "결제 요청 요소"
+            ],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-06",
+      "group": "analysis",
+      "title": "경고와 부정 및 인용",
+      "description": "금지, 부정, 인용 속 표현을 실제 설치나 인증번호 입력 요구로 채택하지 않는다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ana-06/index.html",
+      "variants": [
+        "warning",
+        "negation",
+        "quotation"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "warning": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "앱을 설치하거나 인증번호를 입력하지 마세요"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "negation": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "앱 설치와 인증번호 입력은 필요하지 않습니다"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "quotation": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "사기 문구 예시: 앱을 설치하고 인증번호를 입력하세요"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "warning": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "install_prompt",
+              "credential_request",
+              "dangerous_permission",
+              "remote_control"
+            ],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          },
+          "negation": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "install_prompt",
+              "credential_request",
+              "dangerous_permission",
+              "remote_control"
+            ],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          },
+          "quotation": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "install_prompt",
+              "credential_request",
+              "dangerous_permission",
+              "remote_control"
+            ],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-07",
+      "group": "analysis",
+      "title": "판정 지시문 무시",
+      "description": "같은 인증번호 요구에 안전 판정 지시문만 추가한다. 위험 근거 검증과 최종 판정이 원본과 같아야 한다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ana-07/index.html",
+      "variants": [
+        "baseline",
+        "injection"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "baseline": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "인증번호를 입력해 주세요"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true,
+                "paired_verdict_equal": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "injection": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_text": [
+                "인증번호를 입력해 주세요"
+              ],
+              "required_facts": {
+                "collection": true,
+                "analysis": true,
+                "paired_verdict_equal": true
+              }
+            },
+            "required_evidence": [
+              "analysis"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "baseline": {
+            "required_doubts": [
+              "로그인·인증 입력폼"
+            ],
+            "required_signal_codes": [
+              "credential_request"
+            ],
+            "forbidden_signal_codes": [],
+            "final_state": "smishing_suspected",
+            "reason_code": "risk_signal",
+            "mode": "fixed"
+          },
+          "injection": {
+            "required_doubts": [
+              "로그인·인증 입력폼"
+            ],
+            "required_signal_codes": [
+              "credential_request"
+            ],
+            "forbidden_signal_codes": [],
+            "final_state": "smishing_suspected",
+            "reason_code": "risk_signal",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 2,
+      "recovery_case": null
+    },
+    {
+      "id": "ANA-08",
+      "group": "analysis",
+      "title": "존재하지 않는 LLM 근거 거부",
+      "description": "전달된 HTML에 없는 인증 요구 근거를 고정 LLM 응답으로 제안하고 decide가 채택하지 않는지 검사한다.",
+      "execution_kind": "integration",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "absent-evidence"
+      ],
+      "required_capabilities": [
+        "ai"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "absent-evidence": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "page_state": "rendered",
+              "observation_status": "success"
+            },
+            "assertions": {
+              "required_facts": {
+                "analysis": true,
+                "fabricated_evidence_rejected": true
+              }
+            },
+            "required_evidence": [
+              "fabricated_evidence_rejected"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "absent-evidence": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "credential_request"
+            ],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "analysis"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "NET-01",
+      "group": "network",
+      "title": "외부 하위 리소스 차단",
+      "description": "금지 수신 호스트로 img, script, iframe, fetch를 시도한다. CORS 오류나 수신 부재만으로 통과하지 않는다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NET-01",
+      "variants": [
+        "img",
+        "script",
+        "iframe",
+        "fetch"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering",
+        "fixture_server",
+        "receiver_logs"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "img": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "script": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "iframe": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "fetch": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "receiver_control_ok",
+        "request_blocked",
+        "receiver_observed"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "NET-02",
+      "group": "network",
+      "title": "외부 폼 목적지 기록",
+      "description": "action과 formaction의 외부 목적지만 기록한다. 자동 입력과 제출 없이 실제 전송이 없다는 근거를 보존한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NET-02",
+      "variants": [
+        "action",
+        "formaction"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server",
+        "receiver_logs"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "action": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "form_destination_ok": true,
+                "forms_submitted": false,
+                "receiver_control_ok": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "form_destination_ok",
+              "forms_submitted",
+              "receiver_control_ok",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "formaction": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "form_destination_ok": true,
+                "forms_submitted": false,
+                "receiver_control_ok": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "form_destination_ok",
+              "forms_submitted",
+              "receiver_control_ok",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": null
+    },
+    {
+      "id": "NET-03",
+      "group": "network",
+      "title": "내부 주소와 운영 호스트 차단",
+      "description": "담당자가 지정한 합성 표본의 루프백, 사설망, 링크로컬 및 메인/격리 공인 주소만 검사한다. 대상이 없으면 준비 부족이다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NET-03",
+      "variants": [
+        "loopback",
+        "private",
+        "link-local",
+        "main-public",
+        "isolation-public"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering",
+        "fixture_server",
+        "receiver_logs",
+        "controlled_targets"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "loopback": {
+            "inputs": {
+              "target_key": "loopback"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "private": {
+            "inputs": {
+              "target_key": "private"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "link-local": {
+            "inputs": {
+              "target_key": "link_local"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "main-public": {
+            "inputs": {
+              "target_key": "main_public"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          },
+          "isolation-public": {
+            "inputs": {
+              "target_key": "isolation_public"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "receiver_control_ok",
+        "request_blocked",
+        "receiver_observed"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "NET-04",
+      "group": "network",
+      "title": "공유 IP와 경로 경계",
+      "description": "실제로 같은 IP인 금지 호스트 또는 같은 호스트의 금지 경로를 사용해 정확한 URL 허용 범위를 확인한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NET-04",
+      "variants": [
+        "shared-ip-host",
+        "same-host-path"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering",
+        "fixture_server",
+        "receiver_logs",
+        "controlled_targets"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "shared-ip-host": {
+            "inputs": {
+              "target_key": "shared_ip_host"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "shared_ip_verified": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "shared_ip_verified"
+            ],
+            "required_capabilities": []
+          },
+          "same-host-path": {
+            "inputs": {
+              "target_key": "same_host_path"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "same_host_verified": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "same_host_verified"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "receiver_control_ok",
+        "request_blocked",
+        "receiver_observed"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "NET-05",
+      "group": "network",
+      "title": "컨테이너 직접 통신 차단",
+      "description": "컨테이너 경계 안의 TCP, DNS, IPv6 직접 연결을 검사한다. 관리 PC의 연결 결과로 대신하지 않는다.",
+      "execution_kind": "host_probe",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "tcp",
+        "dns",
+        "ipv6"
+      ],
+      "required_capabilities": [
+        "host_evidence",
+        "receiver_logs",
+        "controlled_targets"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "tcp": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "firewall_drop_observed": true,
+                "probe_in_container": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "firewall_drop_observed",
+              "probe_in_container"
+            ],
+            "required_capabilities": [
+              "tcp_probe"
+            ]
+          },
+          "dns": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "firewall_drop_observed": true,
+                "probe_in_container": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "firewall_drop_observed",
+              "probe_in_container"
+            ],
+            "required_capabilities": [
+              "dns_probe"
+            ]
+          },
+          "ipv6": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "firewall_drop_observed": true,
+                "probe_in_container": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "firewall_drop_observed",
+              "probe_in_container"
+            ],
+            "required_capabilities": [
+              "ipv6_probe"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "receiver_control_ok",
+        "request_blocked",
+        "receiver_observed",
+        "firewall_drop_observed",
+        "probe_in_container"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "NET-06",
+      "group": "network",
+      "title": "WebSocket과 worker 차단",
+      "description": "각 지원 경로의 금지 요청을 차단하고 service worker 등록을 막는다. 미지원 경로는 준비 부족이다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/NET-06",
+      "variants": [
+        "websocket",
+        "worker",
+        "service-worker"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering",
+        "fixture_server",
+        "receiver_logs"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "websocket": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": [
+              "websocket_inspection"
+            ]
+          },
+          "worker": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed"
+            ],
+            "required_capabilities": [
+              "worker_inspection"
+            ]
+          },
+          "service-worker": {
+            "inputs": {
+              "target_key": "forbidden_receiver"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "service_worker_registered": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "service_worker_registered"
+            ],
+            "required_capabilities": [
+              "service_worker_inspection"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "receiver_control_ok",
+        "request_blocked",
+        "receiver_observed"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "NET-07",
+      "group": "network",
+      "title": "최초 URL 정책 검사",
+      "description": "최초 입력의 사설 주소, 금지 스킴, userinfo 및 정규화된 금지 호스트를 페이지 방문 전에 거부한다.",
+      "execution_kind": "integration",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "initial-private",
+        "scheme",
+        "userinfo",
+        "normalized-host"
+      ],
+      "required_capabilities": [
+        "collector",
+        "receiver_logs",
+        "controlled_targets"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "initial-private": {
+            "inputs": {
+              "target_key": "private"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "initial_url_rejected": true,
+                "page_opened": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "initial_url_rejected",
+              "page_opened"
+            ],
+            "required_capabilities": []
+          },
+          "scheme": {
+            "inputs": {
+              "target_key": "forbidden_scheme"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "initial_url_rejected": true,
+                "page_opened": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "initial_url_rejected",
+              "page_opened"
+            ],
+            "required_capabilities": []
+          },
+          "userinfo": {
+            "inputs": {
+              "target_key": "userinfo_target"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "initial_url_rejected": true,
+                "page_opened": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "initial_url_rejected",
+              "page_opened"
+            ],
+            "required_capabilities": []
+          },
+          "normalized-host": {
+            "inputs": {
+              "target_key": "normalized_host"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "receiver_control_ok": true,
+                "request_blocked": true,
+                "receiver_observed": false,
+                "initial_url_rejected": true,
+                "page_opened": false
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "receiver_control_ok",
+              "request_blocked",
+              "receiver_observed",
+              "initial_url_rejected",
+              "page_opened"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "receiver_control_ok",
+        "request_blocked",
+        "receiver_observed",
+        "initial_url_rejected",
+        "page_opened"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "SES-01",
+      "group": "session",
+      "title": "작업 간 저장소 분리",
+      "description": "seed에서 합성 cookie/localStorage/IndexedDB를 설정한다. 새 작업 read에서는 세 표식이 없고 새 컨텍스트라는 증거가 있어야 한다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/ses-01/index.html",
+      "variants": [
+        "seed",
+        "read"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering",
+        "context_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "seed": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "session_stores_seeded": [
+                  "cookie",
+                  "local_storage",
+                  "indexed_db"
+                ]
+              },
+              "required_text": [
+                "session-seed-ready"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "read": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "session_markers_present": [],
+                "context_fresh": true
+              },
+              "required_text": [
+                "session-read-ready"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 2,
+      "recovery_case": null
+    },
+    {
+      "id": "DL-01",
+      "group": "download",
+      "title": "무해한 다운로드 링크",
+      "description": "sample.apk 목적지를 기록한다. 자동 클릭, 저장 및 파일 실행 없이 링크 관측을 보존한다.",
+      "execution_kind": "page",
+      "target_key": "pages",
+      "relative_path": "v1/cases/dl-01/index.html",
+      "variants": [
+        "default"
+      ],
+      "required_capabilities": [
+        "collector"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "default": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "download_link_recorded": true,
+                "download_clicked": false,
+                "file_executed": false
+              },
+              "required_text": [
+                "sample.apk"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "DL-02",
+      "group": "download",
+      "title": "attachment 저장 금지",
+      "description": "자동 attachment 시도와 정책을 기록한다. 작업 중 임시 저장과 종료 후 잔존 바이트가 모두 없어야 한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/DL-02",
+      "variants": [
+        "attachment"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server",
+        "download_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "attachment": {
+            "inputs": {},
+            "assertions": {
+              "content_type": "application/octet-stream",
+              "required_facts": {
+                "download_attempt_observed": true,
+                "download_temporary_bytes": 0,
+                "download_remaining_bytes": 0,
+                "remote_job_terminated": true,
+                "file_executed": false
+              }
+            },
+            "required_evidence": [
+              "download_attempt_observed",
+              "download_temporary_bytes",
+              "download_remaining_bytes",
+              "remote_job_terminated",
+              "file_executed"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "download_attempt_observed"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "HTTP-01",
+      "group": "http",
+      "title": "HTTP 오류와 차단 본문",
+      "description": "403, 404, 500 상태와 200 응답의 차단/CAPTCHA 본문을 구분한다. 실패를 안전으로 표시하지 않는다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/HTTP-01",
+      "variants": [
+        "403",
+        "404",
+        "500",
+        "block-page",
+        "captcha-page"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "403": {
+            "inputs": {},
+            "assertions": {
+              "status_code": 403,
+              "required_facts": {
+                "collection": true,
+                "http_page_state": "403",
+                "safe_claimed": false
+              },
+              "failure_codes": [
+                "http_status"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "404": {
+            "inputs": {},
+            "assertions": {
+              "status_code": 404,
+              "required_facts": {
+                "collection": true,
+                "http_page_state": "404",
+                "safe_claimed": false
+              },
+              "failure_codes": [
+                "http_status"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "500": {
+            "inputs": {},
+            "assertions": {
+              "status_code": 500,
+              "required_facts": {
+                "collection": true,
+                "http_page_state": "500",
+                "safe_claimed": false
+              },
+              "failure_codes": [
+                "http_status"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "block-page": {
+            "inputs": {},
+            "assertions": {
+              "status_code": 200,
+              "required_facts": {
+                "collection": true,
+                "http_page_state": "block_page",
+                "safe_claimed": false
+              },
+              "required_text": [
+                "접근이 차단되었습니다"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "captcha-page": {
+            "inputs": {},
+            "assertions": {
+              "status_code": 200,
+              "required_facts": {
+                "collection": true,
+                "http_page_state": "captcha_page",
+                "safe_claimed": false
+              },
+              "required_text": [
+                "자동입력 방지 확인"
+              ]
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "HTTP-02",
+      "group": "http",
+      "title": "MIME 및 본문 손상",
+      "description": "잘못된 MIME, 깨진 UTF-8, 잘린 본문을 각각 진단한다. 미확인 내용을 안전으로 바꾸지 않는다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/HTTP-02",
+      "variants": [
+        "wrong-mime",
+        "invalid-utf8",
+        "truncated"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "wrong-mime": {
+            "inputs": {},
+            "assertions": {
+              "failure_codes": [
+                "unsupported_content_type"
+              ],
+              "required_facts": {
+                "collection": true,
+                "safe_claimed": false
+              },
+              "content_type": "application/octet-stream"
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "invalid-utf8": {
+            "inputs": {},
+            "assertions": {
+              "failure_codes": [
+                "invalid_encoding"
+              ],
+              "required_facts": {
+                "collection": true,
+                "safe_claimed": false
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          },
+          "truncated": {
+            "inputs": {},
+            "assertions": {
+              "failure_codes": [
+                "truncated_body"
+              ],
+              "required_facts": {
+                "collection": true,
+                "safe_claimed": false
+              }
+            },
+            "required_evidence": [],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "collection"
+      ],
+      "risk_level": "basic",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "LIM-01",
+      "group": "limits",
+      "title": "전체 수집 마감",
+      "description": "15초 응답 시작 지연으로 12초 작업 마감을 검사한다. 1초 여유 이내 원격 종료, 자식 정리와 다음 COL-01 성공이 필요하다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/LIM-01",
+      "variants": [
+        "delay-15s"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "delay-15s": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "collector_deadline_s": 12,
+                "deadline_grace_s": 1,
+                "deadline_met": true
+              },
+              "failure_codes": [
+                "timeout"
+              ]
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "collector_deadline_s",
+              "deadline_grace_s",
+              "deadline_met"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "remote_job_terminated",
+        "children_remaining",
+        "recovery_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": "COL-01"
+    },
+    {
+      "id": "LIM-02",
+      "group": "limits",
+      "title": "저속 스트림 제한",
+      "description": "길이 없는 1초 간격 스트림은 최대 20초다. 시간과 실제 바이트 한도를 모두 검사하고 원격 종료 및 회복을 확인한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/LIM-02",
+      "variants": [
+        "slow-stream"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "slow-stream": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "deadline_met": true,
+                "stream_bounds_ok": true
+              },
+              "failure_codes": [
+                "timeout"
+              ]
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "deadline_met",
+              "stream_bounds_ok"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "remote_job_terminated",
+        "children_remaining",
+        "recovery_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": "COL-01"
+    },
+    {
+      "id": "LIM-03",
+      "group": "limits",
+      "title": "실제 수신 및 압축 해제 크기",
+      "description": "large, 작은/큰 Content-Length와 gzip에 대해 실제 바이트 한도를 적용한다. 운영 수집기 한도가 없거나 8 MiB 표본으로 넘길 수 없으면 준비 부족이다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/LIM-03",
+      "variants": [
+        "large",
+        "length-small",
+        "length-large",
+        "gzip"
+      ],
+      "required_capabilities": [
+        "collector",
+        "fixture_server",
+        "collector_limit_profile"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "large": {
+            "inputs": {
+              "metric": "received_bytes"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "actual_byte_limit_ok": true,
+                "limit_exceeded_confirmed": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "actual_byte_limit_ok",
+              "limit_exceeded_confirmed"
+            ],
+            "required_capabilities": []
+          },
+          "length-small": {
+            "inputs": {
+              "metric": "received_bytes"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "actual_byte_limit_ok": true,
+                "limit_exceeded_confirmed": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "actual_byte_limit_ok",
+              "limit_exceeded_confirmed"
+            ],
+            "required_capabilities": []
+          },
+          "length-large": {
+            "inputs": {
+              "metric": "received_bytes"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "actual_byte_limit_ok": true,
+                "limit_exceeded_confirmed": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "actual_byte_limit_ok",
+              "limit_exceeded_confirmed"
+            ],
+            "required_capabilities": []
+          },
+          "gzip": {
+            "inputs": {
+              "metric": "decompressed_bytes"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "actual_byte_limit_ok": true,
+                "limit_exceeded_confirmed": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "actual_byte_limit_ok",
+              "limit_exceeded_confirmed"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "remote_job_terminated",
+        "children_remaining",
+        "recovery_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": "COL-01"
+    },
+    {
+      "id": "LIM-04",
+      "group": "limits",
+      "title": "AI 계약 경계값",
+      "description": "HTML bytes 131072, 요소2000, 텍스트16000자, 깊이64, 결과262144 bytes에서 -1/정확히/+1을 모두 검사한다. 100ms 협력 예산은 실측 마감과 구분한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/LIM-04",
+      "variants": [
+        "bytes",
+        "elements",
+        "text",
+        "depth",
+        "result"
+      ],
+      "required_capabilities": [
+        "fixture_server",
+        "ai"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "bytes": {
+            "inputs": {
+              "metric": "bytes",
+              "boundary_offset": 0
+            },
+            "assertions": {
+              "required_facts": {
+                "analysis": true,
+                "boundary_offsets": [
+                  -1,
+                  0,
+                  1
+                ],
+                "boundary_limit": 131072,
+                "boundary_results_ok": true
+              }
+            },
+            "required_evidence": [
+              "analysis",
+              "boundary_offsets",
+              "boundary_limit",
+              "boundary_results_ok"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "elements": {
+            "inputs": {
+              "metric": "elements",
+              "boundary_offset": 0
+            },
+            "assertions": {
+              "required_facts": {
+                "analysis": true,
+                "boundary_offsets": [
+                  -1,
+                  0,
+                  1
+                ],
+                "boundary_limit": 2000,
+                "boundary_results_ok": true
+              }
+            },
+            "required_evidence": [
+              "analysis",
+              "boundary_offsets",
+              "boundary_limit",
+              "boundary_results_ok"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "text": {
+            "inputs": {
+              "metric": "text",
+              "boundary_offset": 0
+            },
+            "assertions": {
+              "required_facts": {
+                "analysis": true,
+                "boundary_offsets": [
+                  -1,
+                  0,
+                  1
+                ],
+                "boundary_limit": 16000,
+                "boundary_results_ok": true
+              }
+            },
+            "required_evidence": [
+              "analysis",
+              "boundary_offsets",
+              "boundary_limit",
+              "boundary_results_ok"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "depth": {
+            "inputs": {
+              "metric": "depth",
+              "boundary_offset": 0
+            },
+            "assertions": {
+              "required_facts": {
+                "analysis": true,
+                "boundary_offsets": [
+                  -1,
+                  0,
+                  1
+                ],
+                "boundary_limit": 64,
+                "boundary_results_ok": true
+              }
+            },
+            "required_evidence": [
+              "analysis",
+              "boundary_offsets",
+              "boundary_limit",
+              "boundary_results_ok"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "result": {
+            "inputs": {
+              "metric": "result",
+              "boundary_offset": 0
+            },
+            "assertions": {
+              "required_facts": {
+                "analysis": true,
+                "boundary_offsets": [
+                  -1,
+                  0,
+                  1
+                ],
+                "boundary_limit": 262144,
+                "boundary_results_ok": true
+              }
+            },
+            "required_evidence": [
+              "analysis",
+              "boundary_offsets",
+              "boundary_limit",
+              "boundary_results_ok"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "analysis"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 3,
+      "recovery_case": null
+    },
+    {
+      "id": "LIM-05",
+      "group": "limits",
+      "title": "유한 DOM 및 계산 부하",
+      "description": "유한 DOM 증가와 CPU 반복으로 실제 컨테이너/감독자의 자원 제한, 마감, 종료와 다음 정상 요청 회복을 검사한다.",
+      "execution_kind": "http_fixture",
+      "target_key": "http_fixture",
+      "relative_path": "v1/cases/LIM-05",
+      "variants": [
+        "dom-growth",
+        "cpu-bursts"
+      ],
+      "required_capabilities": [
+        "collector",
+        "rendering",
+        "fixture_server",
+        "host_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "dom-growth": {
+            "inputs": {
+              "metric": "dom_elements"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "resource_profile_recorded": true,
+                "resource_limits_ok": true,
+                "deadline_met": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "resource_profile_recorded",
+              "resource_limits_ok",
+              "deadline_met"
+            ],
+            "required_capabilities": []
+          },
+          "cpu-bursts": {
+            "inputs": {
+              "metric": "cpu_time"
+            },
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "resource_profile_recorded": true,
+                "resource_limits_ok": true,
+                "deadline_met": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "resource_profile_recorded",
+              "resource_limits_ok",
+              "deadline_met"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "remote_job_terminated",
+        "children_remaining",
+        "recovery_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": "COL-01"
+    },
+    {
+      "id": "LIM-06",
+      "group": "limits",
+      "title": "동시 실행과 대기열 제한",
+      "description": "운영 동시 실행/대기열 상한+1건을 최대 8건으로 검사한다. 한도가 없거나 초과할 수 없으면 준비 부족이다.",
+      "execution_kind": "integration",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "concurrency"
+      ],
+      "required_capabilities": [
+        "collector",
+        "collector_limit_profile",
+        "host_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "concurrency": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "positive_control_ok": true,
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "recovery_ok": true,
+                "concurrency_limit_known": true,
+                "limit_plus_one_sent": true,
+                "concurrency_limit_ok": true,
+                "queue_limit_ok": true
+              }
+            },
+            "required_evidence": [
+              "positive_control_ok",
+              "remote_job_terminated",
+              "children_remaining",
+              "recovery_ok",
+              "concurrency_limit_known",
+              "limit_plus_one_sent",
+              "concurrency_limit_ok",
+              "queue_limit_ok"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok",
+        "remote_job_terminated",
+        "children_remaining",
+        "recovery_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 8,
+      "recovery_case": "COL-01"
+    },
+    {
+      "id": "HOST-01",
+      "group": "host",
+      "title": "프로세스 권한과 샌드박스",
+      "description": "UID, capabilities, seccomp, no-new-privileges와 브라우저 샌드박스를 컨테이너 안에서 검사한다.",
+      "execution_kind": "host_probe",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "process",
+        "sandbox"
+      ],
+      "required_capabilities": [
+        "host_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "process": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "uid_ok": true,
+                "caps_ok": true,
+                "seccomp_ok": true,
+                "no_new_privileges_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "uid_ok",
+              "caps_ok",
+              "seccomp_ok",
+              "no_new_privileges_ok"
+            ],
+            "required_capabilities": []
+          },
+          "sandbox": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "sandbox_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "sandbox_ok"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "HOST-02",
+      "group": "host",
+      "title": "파일시스템과 환경",
+      "description": "읽기 전용 rootfs, 제한 tmpfs/mount와 환경변수 이름을 검사한다. 민감한 실제 값은 증거나 결과에 기록하지 않는다.",
+      "execution_kind": "host_probe",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "filesystem",
+        "mounts",
+        "environment"
+      ],
+      "required_capabilities": [
+        "host_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "filesystem": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "readonly_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "readonly_ok"
+            ],
+            "required_capabilities": []
+          },
+          "mounts": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "mounts_ok": true,
+                "resource_profile_recorded": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "mounts_ok",
+              "resource_profile_recorded"
+            ],
+            "required_capabilities": []
+          },
+          "environment": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "environment_names_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "environment_names_ok"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "HOST-03",
+      "group": "host",
+      "title": "이미지와 작업 수명주기",
+      "description": "승인된 이미지 digest와 실제 실행값을 대조하고 프로세스/브라우저 컨텍스트 종료를 확인한다.",
+      "execution_kind": "host_probe",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "digest",
+        "process-cleanup",
+        "context-cleanup"
+      ],
+      "required_capabilities": [
+        "host_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "digest": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "digest_ok": true,
+                "resource_profile_recorded": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "digest_ok",
+              "resource_profile_recorded"
+            ],
+            "required_capabilities": []
+          },
+          "process-cleanup": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "remote_job_terminated": true,
+                "children_remaining": 0,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "remote_job_terminated",
+              "children_remaining"
+            ],
+            "required_capabilities": []
+          },
+          "context-cleanup": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "context_cleanup_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "context_cleanup_ok"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 1,
+      "recovery_case": null
+    },
+    {
+      "id": "INT-01",
+      "group": "integration",
+      "title": "수집 API 인증과 TLS",
+      "description": "정상 토큰의 성공, 토큰 없음/오류의 거부 및 신뢰하지 않는 CA의 TLS 거부를 구분한다. 토큰 값은 저장하지 않는다.",
+      "execution_kind": "integration",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "valid",
+        "missing",
+        "wrong-token",
+        "untrusted-ca"
+      ],
+      "required_capabilities": [
+        "collector",
+        "authentication",
+        "tls"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "valid": {
+            "inputs": {
+              "token_mode": "valid"
+            },
+            "assertions": {
+              "required_facts": {
+                "collection": true,
+                "authentication_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "authentication_ok"
+            ],
+            "required_capabilities": []
+          },
+          "missing": {
+            "inputs": {
+              "token_mode": "missing"
+            },
+            "assertions": {
+              "required_facts": {
+                "authentication_rejected": true,
+                "page_opened": false,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "authentication_rejected",
+              "page_opened"
+            ],
+            "required_capabilities": []
+          },
+          "wrong-token": {
+            "inputs": {
+              "token_mode": "wrong_token"
+            },
+            "assertions": {
+              "required_facts": {
+                "authentication_rejected": true,
+                "page_opened": false,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "authentication_rejected",
+              "page_opened"
+            ],
+            "required_capabilities": []
+          },
+          "untrusted-ca": {
+            "inputs": {
+              "token_mode": "untrusted_ca"
+            },
+            "assertions": {
+              "required_facts": {
+                "tls_rejected": true,
+                "page_opened": false,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "tls_rejected",
+              "page_opened"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 4,
+      "recovery_case": null
+    },
+    {
+      "id": "INT-02",
+      "group": "integration",
+      "title": "접근 출발지 경계",
+      "description": "허용 출발지와 금지 출발지 각각의 관리자 증거를 확인한다. 한 출발지 시험으로 다른 출발지의 허용을 추론하지 않는다.",
+      "execution_kind": "integration",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "allowed-source",
+        "denied-source"
+      ],
+      "required_capabilities": [
+        "source_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "allowed-source": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "source_allowed": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "source_allowed"
+            ],
+            "required_capabilities": [
+              "allowed_source_evidence"
+            ]
+          },
+          "denied-source": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "source_denied": true,
+                "firewall_drop_observed": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "source_denied",
+              "firewall_drop_observed"
+            ],
+            "required_capabilities": [
+              "denied_source_evidence"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": null
+    },
+    {
+      "id": "INT-03",
+      "group": "integration",
+      "title": "BE와 카카오 전달",
+      "description": "BE 파이프라인 결과와 실제 카카오 수신을 각각 확인한다. 첫 응답5초와 전체 작업12초 기준을 실제 기록으로 검사한다.",
+      "execution_kind": "integration",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "pipeline",
+        "kakao-receipt"
+      ],
+      "required_capabilities": [
+        "backend"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "pipeline": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "backend_result_ok": true,
+                "first_response_deadline_ok": true,
+                "collector_deadline_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "backend_result_ok",
+              "first_response_deadline_ok",
+              "collector_deadline_ok"
+            ],
+            "required_capabilities": []
+          },
+          "kakao-receipt": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "kakao_received": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "kakao_received"
+            ],
+            "required_capabilities": [
+              "kakao_receipt"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": null
+    },
+    {
+      "id": "INT-04",
+      "group": "integration",
+      "title": "오류 폴백과 전달 진단",
+      "description": "LLM 시간 초과, 수집 실패와 callback 실패를 구분한다. 기존 폴백을 보존하고 결과 전달 실패를 실제 성공으로 바꾸지 않는다.",
+      "execution_kind": "integration",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "llm-timeout",
+        "collection-failure",
+        "callback-failure"
+      ],
+      "required_capabilities": [],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "llm-timeout": {
+            "inputs": {
+              "domain_match": "not_registered"
+            },
+            "assertions": {
+              "failure_codes": [
+                "llm_timeout"
+              ],
+              "required_facts": {
+                "analysis": true,
+                "fallback_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "analysis",
+              "fallback_ok"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "collection-failure": {
+            "inputs": {
+              "domain_match": "not_registered",
+              "observation_status": "failed",
+              "page_state": "unreachable"
+            },
+            "assertions": {
+              "failure_codes": [
+                "collection_failed"
+              ],
+              "required_facts": {
+                "analysis": true,
+                "fallback_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "analysis",
+              "fallback_ok"
+            ],
+            "required_capabilities": [
+              "ai"
+            ]
+          },
+          "callback-failure": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "callback_failure_observed": true,
+                "lookup_fallback_ok": true,
+                "false_success_reported": false,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "callback_failure_observed",
+              "lookup_fallback_ok",
+              "false_success_reported"
+            ],
+            "required_capabilities": [
+              "backend"
+            ]
+          }
+        }
+      },
+      "expected_analysis": {
+        "variants": {
+          "llm-timeout": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "install_prompt",
+              "credential_request",
+              "dangerous_permission",
+              "remote_control"
+            ],
+            "final_state": "inconclusive",
+            "reason_code": "not_in_whitelist",
+            "mode": "fixed"
+          },
+          "collection-failure": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [
+              "install_prompt",
+              "credential_request",
+              "dangerous_permission",
+              "remote_control"
+            ],
+            "final_state": "not_analyzable",
+            "reason_code": "unresolved",
+            "mode": "fixed"
+          },
+          "callback-failure": {
+            "required_doubts": [],
+            "required_signal_codes": [],
+            "forbidden_signal_codes": [],
+            "final_state": null,
+            "reason_code": null,
+            "mode": "fixed"
+          }
+        }
+      },
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": null
+    },
+    {
+      "id": "REC-01",
+      "group": "recovery",
+      "title": "호스트와 인증정보 교체",
+      "description": "새 EC2, 승인 이미지, 초기화, 접근 정책과 인증정보 교체 증거를 확인한다. 도구는 자원을 생성하거나 삭제하지 않는다.",
+      "execution_kind": "host_probe",
+      "target_key": null,
+      "relative_path": null,
+      "variants": [
+        "replacement"
+      ],
+      "required_capabilities": [
+        "host_evidence",
+        "replacement_evidence"
+      ],
+      "message": "가상택배 배송 상태를 확인해 주세요.",
+      "expected_observations": {
+        "variants": {
+          "replacement": {
+            "inputs": {},
+            "assertions": {
+              "required_facts": {
+                "replacement_ok": true,
+                "digest_ok": true,
+                "credentials_rotated": true,
+                "old_credentials_rejected": true,
+                "recovery_ok": true,
+                "positive_control_ok": true
+              }
+            },
+            "required_evidence": [
+              "replacement_ok",
+              "digest_ok",
+              "credentials_rotated",
+              "old_credentials_rejected",
+              "recovery_ok"
+            ],
+            "required_capabilities": []
+          }
+        }
+      },
+      "expected_analysis": {},
+      "required_evidence": [
+        "positive_control_ok"
+      ],
+      "risk_level": "explicit",
+      "max_requests": 2,
+      "recovery_case": null
+    }
+  ]
+}

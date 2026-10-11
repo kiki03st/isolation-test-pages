@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>격리 서버 테스트 목록</title>
+<link rel="stylesheet" href="assets/styles.css"></head>
+<body><main>
+<h1>격리 서버 테스트 목록</h1>
+<p class="note">합성 자료만 제공합니다. 이 페이지는 테스트를 실행하거나 API 인증정보를 받지 않습니다.</p>
+<div class="controls">
+<label>검색 <input type="search" id="search" aria-label="검색" placeholder="번호, 제목, 문자"></label>
+<label>분류 <select id="category" aria-label="분류"><option value="">전체</option></select></label>
+</div>
+<p id="status" role="status"></p>
+<section id="fallback" hidden>
+<label for="fallback-text">복사할 내용을 직접 선택해 복사하세요.</label>
+<textarea id="fallback-text" readonly rows="3"></textarea>
+</section>
+<div id="cases"></div>
+<footer id="source"></footer>
+</main>
+<script src="assets/catalog.js"></script></body></html>

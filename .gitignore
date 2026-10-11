@@ -11,3 +11,7 @@ evidence/
 *.key
 *.log
 .env*
+host-probe*.json
+*.jsonl
+*.crt
+*.p12

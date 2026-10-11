@@ -1,0 +1,72 @@
+{
+  "note": "Synthetic placeholders only. Each record becomes one JSONL line in the evidence directory. Only approved fact names are accepted; secrets, instance IDs and file contents must never be written here. receiver_observed and receiver_control_ok are never written here: the runner reads them from the receiver log, which must hold the trial's /v1/control/<case> event (for NET-05 sent by the administrator inside this record's window).",
+  "records": [
+    {
+      "run_id": "example-run-1",
+      "case_id": "HOST-03",
+      "started_at": "2026-01-01T00:00:00Z",
+      "ended_at": "2026-01-01T00:00:05Z",
+      "facts": {
+        "variant": "digest",
+        "digest_ok": true,
+        "resource_profile_recorded": true,
+        "positive_control_ok": true,
+        "observed_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "approved_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "observed_digest_kind": "image_manifest",
+        "approved_digest_kind": "image_manifest",
+        "observed_digest_platform": "linux/amd64",
+        "approved_digest_platform": "linux/amd64"
+      },
+      "references": []
+    },
+    {
+      "run_id": "example-run-2",
+      "case_id": "NET-05",
+      "started_at": "2026-01-01T00:01:00Z",
+      "ended_at": "2026-01-01T00:01:05Z",
+      "facts": {
+        "variant": "tcp",
+        "boundary": "container",
+        "evidence_source": "observed",
+        "positive_control_ok": true,
+        "request_blocked": true,
+        "firewall_drop_observed": true,
+        "probe_in_container": true
+      },
+      "references": []
+    },
+    {
+      "run_id": "example-run-3",
+      "case_id": "REC-01",
+      "started_at": "2026-01-01T00:02:00Z",
+      "ended_at": "2026-01-01T00:20:00Z",
+      "facts": {
+        "variant": "replacement",
+        "evidence_source": "observed",
+        "replacement_kind": "new_instance",
+        "replacement_ok": true,
+        "digest_ok": true,
+        "credentials_rotated": true,
+        "old_credentials_rejected": true,
+        "recovery_ok": true,
+        "followup_run_id": "example-followup-run",
+        "positive_control_ok": true
+      },
+      "references": []
+    },
+    {
+      "run_id": "example-run-4",
+      "case_id": "INT-03",
+      "started_at": "2026-01-01T00:30:00Z",
+      "ended_at": "2026-01-01T00:30:20Z",
+      "facts": {
+        "variant": "kakao-receipt",
+        "evidence_source": "observed",
+        "kakao_received": true,
+        "positive_control_ok": true
+      },
+      "references": []
+    }
+  ]
+}

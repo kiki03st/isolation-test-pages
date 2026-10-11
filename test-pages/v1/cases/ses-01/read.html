@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>저장소 표본 확인</title></head><body><main><p>저장된 값을 확인합니다.</p><script>
+(async () => {
+  const value = 'isolation-test';
+  const hasCookie = document.cookie.split('; ').includes('isolation_test=' + value);
+  const hasLocal = localStorage.getItem('isolation_test') === value;
+  let hasIndexed = false;
+  const names = (await indexedDB.databases()).map(d => d.name);
+  if (names.includes('isolation-test-db')) {
+    hasIndexed = await new Promise(resolve => {
+      const open = indexedDB.open('isolation-test-db');
+      open.onerror = () => resolve(false);
+      open.onsuccess = () => {
+        const db = open.result;
+        if (!db.objectStoreNames.contains('seed')) { db.close(); resolve(false); return; }
+        const get = db.transaction('seed').objectStore('seed').get('seed');
+        get.onsuccess = () => { db.close(); resolve(get.result === value); };
+        get.onerror = () => { db.close(); resolve(false); };
+      };
+    });
+  }
+  const result = document.createElement('p');
+  result.dataset.test = 'session-result';
+  result.textContent = (hasCookie || hasLocal || hasIndexed) ? 'retained' : 'empty';
+  document.querySelector('main').append(result);
+})();
+</script>
+<p>합성 테스트 자료입니다.</p></main></body></html>

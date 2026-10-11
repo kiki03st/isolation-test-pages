@@ -1,0 +1,467 @@
+"""Host probe: names only, Linux only, and a strict administrator evidence contract."""
+
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1] / "tools" / "isolation-tests"
+SECRET = "synthetic-value-do-not-export"
+DIGEST = "sha256:" + "a" * 64
+OTHER = "sha256:" + "b" * 64
+
+
+def test_environment_values_are_never_in_facts(monkeypatch):
+    from isolation_tests.host_probes import collect_host_facts
+    monkeypatch.setenv('SYNTHETIC_API_KEY', 'synthetic-value-do-not-export')
+    facts = collect_host_facts()
+    assert 'synthetic-value-do-not-export' not in str(facts)
+    assert facts['environment_names_ok'] is False
+
+
+@pytest.mark.parametrize("names,expected", [
+    (["PATH", "HOME"], True),
+    (["AWS_REGION"], False),
+    (["OPENAI_API_KEY"], False),
+    (["ISOLATION_TOKEN"], False),
+    (["KAKAO_SKILL_SECRET"], False),
+    (["MY_API_KEYS"], True),
+])
+def test_environment_names_ok(names, expected):
+    from isolation_tests.host_probes import environment_names_ok
+    assert environment_names_ok(names) is expected
+
+
+def test_non_linux_is_unsupported_boundary_with_no_invented_facts(monkeypatch):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_platform", lambda: "win32")
+    facts = host_probes.collect_host_facts()
+    assert facts["unsupported_boundary"] is True
+    for name in ("uid_ok", "caps_ok", "seccomp_ok", "no_new_privileges_ok", "readonly_ok", "mounts_ok"):
+        assert name not in facts
+
+
+STATUS_OK = "Name:\tx\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2\n"
+MOUNTS_OK = "overlay / overlay ro,relatime 0 0\ntmpfs /tmp tmpfs rw 0 0\n"
+
+
+def as_mountinfo(mounts):
+    """/proc/self/mounts lines as /proc/self/mountinfo lines (fresh mounts, root "/")."""
+    if mounts is None:
+        return None
+    lines = []
+    for number, line in enumerate(mounts.splitlines(), start=20):
+        device, point, fstype, options = line.split()[:4]
+        lines.append(f"{number} 1 0:{number} / {point} {options} - {fstype} {device} {options}")
+    return "\n".join(lines) + "\n"
+
+
+def linux(monkeypatch, status=STATUS_OK, mounts=MOUNTS_OK, uid=1000, write=True, mountinfo=None,
+          sockets=()):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_platform", lambda: "linux")
+    monkeypatch.setattr(host_probes, "_detect_boundary", lambda: "container")
+    info = mountinfo if mountinfo is not None else as_mountinfo(mounts)
+    monkeypatch.setattr(host_probes, "_read_text", lambda p: {
+        host_probes.PROC_STATUS: status, host_probes.PROC_MOUNTS: mounts,
+        host_probes.PROC_MOUNTINFO: info}.get(p))
+    monkeypatch.setattr(host_probes, "_socket_under", lambda path: path in sockets)
+    monkeypatch.setattr(os, "getuid", lambda: uid, raising=False)
+    monkeypatch.setattr(host_probes, "_write_probe", lambda: write)
+    return host_probes.collect_host_facts()
+
+
+def test_linux_hardened_process_facts(monkeypatch):
+    facts = linux(monkeypatch)
+    assert facts["boundary"] == "container" and facts["unsupported_boundary"] is False
+    for name in ("uid_ok", "caps_ok", "seccomp_ok", "no_new_privileges_ok", "mounts_ok",
+                 "readonly_ok", "positive_control_ok"):
+        assert facts[name] is True, name
+
+
+def test_linux_weak_process_facts(monkeypatch):
+    status = "CapPrm:\t00000000a80425fb\nCapEff:\t00000000a80425fb\nNoNewPrivs:\t0\nSeccomp:\t0\n"
+    facts = linux(monkeypatch, status=status, mounts="overlay / overlay rw 0 0\n", uid=0, write=False)
+    for name in ("uid_ok", "caps_ok", "seccomp_ok", "no_new_privileges_ok", "mounts_ok", "readonly_ok"):
+        assert facts[name] is False, name
+
+
+def test_runtime_socket_mount_fails_mounts(monkeypatch):
+    facts = linux(monkeypatch, mounts=MOUNTS_OK + "tmpfs /var/run/docker.sock tmpfs rw 0 0\n")
+    assert facts["mounts_ok"] is False
+
+
+def test_unreadable_proc_omits_facts(monkeypatch):
+    facts = linux(monkeypatch, status=None, mounts=None)
+    for name in ("uid_ok", "caps_ok", "mounts_ok", "positive_control_ok"):
+        assert name not in facts
+
+
+def test_write_probe_touches_only_its_one_path(monkeypatch, tmp_path):
+    from isolation_tests import host_probes
+    probe = tmp_path / "isolation-test-write-probe"
+    neighbour = tmp_path / "keep.txt"
+    neighbour.write_text("keep")
+    monkeypatch.setattr(host_probes, "WRITE_PROBE_PATH", probe)
+    assert host_probes._write_probe() is False  # creation succeeded -> not read-only
+    assert not probe.exists() and neighbour.read_text() == "keep"
+    monkeypatch.setattr(host_probes, "WRITE_PROBE_PATH", tmp_path / "missing-dir" / "p")
+    assert host_probes._write_probe() is None
+
+
+def test_write_probe_never_removes_a_preexisting_file(monkeypatch, tmp_path):
+    from isolation_tests import host_probes
+    probe = tmp_path / "isolation-test-write-probe"
+    probe.write_text("operator data")
+    monkeypatch.setattr(host_probes, "WRITE_PROBE_PATH", probe)
+    assert host_probes._write_probe() is None
+    assert probe.read_text() == "operator data"
+
+
+def test_cli_host_probe_writes_names_only_and_refuses_overwrite(tmp_path, monkeypatch, capsys):
+    from isolation_tests.runner import main
+    monkeypatch.setenv("SYNTHETIC_API_KEY", SECRET)
+    out = tmp_path / "probe.json"
+    run_id = "r" + "d" * 32
+    code = main(["host-probe", "--output", str(out), "--run-id", run_id])
+    assert code in (0, 2)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["schema"] == "host-probe-v1" and data["facts"]["environment_names_ok"] is False
+    assert data["run_id"] == run_id
+    from datetime import datetime
+    assert datetime.fromisoformat(data["collected_at"]).utcoffset() is not None
+    assert SECRET not in out.read_text(encoding="utf-8") and SECRET not in capsys.readouterr().out
+    assert main(["host-probe", "--output", str(out), "--run-id", run_id]) == 2
+
+
+def test_cli_host_probe_requires_a_safe_run_id(tmp_path):
+    from isolation_tests.runner import main
+    out = tmp_path / "probe.json"
+    with pytest.raises(SystemExit):
+        main(["host-probe", "--output", str(out)])
+    assert main(["host-probe", "--output", str(out), "--run-id", "../x"]) == 2
+    assert not out.exists()
+
+
+# --- evidence contract -------------------------------------------------------
+
+def ev(case_id, **facts):
+    from isolation_tests.model import Evidence
+    return Evidence("example-run", case_id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z", facts, ())
+
+
+def check(case_id, **facts):
+    from isolation_tests.host_probes import validate_host_evidence
+    return validate_host_evidence(case_id, ev(case_id, **facts))
+
+
+def digest_facts(**over):
+    base = dict(variant="digest", digest_ok=True, observed_digest=DIGEST, approved_digest=DIGEST,
+                observed_digest_kind="image_manifest", approved_digest_kind="image_manifest",
+                observed_digest_platform="linux/amd64", approved_digest_platform="linux/amd64")
+    return base | over
+
+
+def test_example_evidence_records_validate():
+    data = json.loads((ROOT / "evidence.example.json").read_text(encoding="utf-8"))
+    for record in data["records"]:
+        result = check(record["case_id"], **record["facts"])
+        assert result.status == "passed", (record["case_id"], result.reason)
+
+
+def test_windows_probe_is_unsupported_boundary():
+    result = check("HOST-01", variant="process", platform="windows", unsupported_boundary=True)
+    assert (result.status, result.reason) == ("blocked", "unsupported_boundary")
+
+
+def test_host_boundary_is_not_accepted_for_container_claims():
+    result = check("HOST-02", variant="environment", boundary="host", environment_names_ok=True)
+    assert (result.status, result.reason) == ("blocked", "wrong_boundary")
+    assert check("HOST-02", variant="environment", boundary="container",
+                 environment_names_ok=True).status == "passed"
+
+
+def test_self_reported_sandbox_is_blocked():
+    base = dict(variant="sandbox", boundary="container", sandbox_ok=True)
+    assert check("HOST-01", **base, evidence_source="self_reported").reason == "self_reported_only"
+    assert check("HOST-01", **base).reason == "self_reported_only"
+    assert check("HOST-01", **base, evidence_source="observed").status == "passed"
+
+
+def test_digest_match_passes_and_mismatch_fails():
+    assert check("HOST-03", **digest_facts()).status == "passed"
+    result = check("HOST-03", **digest_facts(observed_digest=OTHER))
+    assert (result.status, result.reason) == ("failed", "digest_mismatch")
+
+
+def test_digest_kind_or_platform_mismatch_is_not_comparable():
+    for over in ({"observed_digest_kind": "image_index"},
+                 {"observed_digest_platform": "linux/arm64"},
+                 {"observed_digest_kind": "container_id"},
+                 {"approved_digest_kind": "container_id"}):
+        result = check("HOST-03", **digest_facts(**over))
+        assert (result.status, result.reason) == ("blocked", "digest_kind_not_comparable"), over
+
+
+def test_digest_evidence_missing_is_blocked():
+    facts = digest_facts()
+    del facts["approved_digest"]
+    assert check("HOST-03", **facts).reason == "digest_evidence_missing"
+
+
+def rec(**over):
+    base = dict(variant="replacement", replacement_kind="new_instance", replacement_ok=True,
+                credentials_rotated=True, old_credentials_rejected=True, recovery_ok=True,
+                followup_run_id="example-followup-run")
+    return base | over
+
+
+def test_replacement_requires_a_new_instance():
+    assert check("REC-01", **rec()).status == "passed"
+    for kind in ("restart", "reboot"):
+        result = check("REC-01", **rec(replacement_kind=kind))
+        assert (result.status, result.reason) == ("blocked", "replacement_not_demonstrated")
+    assert check("REC-01", variant="replacement", replacement_ok=True).status == "blocked"
+
+
+def test_recovery_needs_followup_run_reference():
+    facts = rec()
+    del facts["followup_run_id"]
+    assert check("REC-01", **facts).reason == "followup_run_missing"
+
+
+def test_block_claims_need_positive_control_and_observation():
+    base = dict(variant="tcp", boundary="container", request_blocked=True, probe_in_container=True)
+    assert check("NET-05", **base).reason == "missing_positive_control"
+    assert check("NET-05", **base, positive_control_ok=True).reason == "self_reported_only"
+    assert check("NET-05", **base, positive_control_ok=True, evidence_source="observed").status == "passed"
+    assert check("NET-05", **base, positive_control_ok=True,
+                 evidence_source="self_reported").reason == "self_reported_only"
+    denied = dict(variant="denied-source", source_denied=True)
+    assert check("INT-02", **denied).reason == "missing_positive_control"
+
+
+def test_kakao_receipt_needs_observed_admin_evidence():
+    assert check("INT-03", variant="kakao-receipt").reason == "kakao_receipt_missing"
+    assert check("INT-03", variant="kakao-receipt", kakao_received=True).reason == "self_reported_only"
+    assert check("INT-03", variant="kakao-receipt", kakao_received=True,
+                 evidence_source="observed").status == "passed"
+
+
+def test_secret_values_and_unapproved_keys_are_rejected_without_echo():
+    token = "Bearer " + SECRET
+    for facts in (
+        dict(variant="digest", observed_digest=token),
+        dict(variant="digest", boundary=token),
+        dict(variant="digest", api_token=SECRET),
+        dict(variant="digest", environment_names_ok=SECRET),
+        {"variant": "digest", "AWS_SECRET": SECRET},
+    ):
+        result = check("HOST-03", **facts)
+        assert result.status == "blocked" and result.reason in {"unapproved_value", "unapproved_fact"}
+        assert SECRET not in repr(result)
+
+
+def test_unknown_case_variant_and_mismatched_case_are_blocked():
+    assert check("COL-01", variant="default").reason == "unsupported_case"
+    assert check("HOST-03", variant="nope").reason == "unknown_variant"
+    from isolation_tests.host_probes import validate_host_evidence
+    assert validate_host_evidence("HOST-03", ev("HOST-01", variant="digest")).reason == "unsupported_case"
+
+
+# --- fix round 1 -------------------------------------------------------------
+
+SECRET_VARIANTS = ["Bearer synthetic-secret", "synthetic-secret-value", "x" * 80]
+
+
+@pytest.mark.parametrize("variant", SECRET_VARIANTS)
+@pytest.mark.parametrize("case_id,facts", [
+    ("COL-01", {}),
+    ("HOST-03", {"api_token": "v"}),
+    ("HOST-03", {"observed_digest": "Bearer s"}),
+    ("HOST-03", {}),
+    ("HOST-03", {"platform": "windows"}),
+])
+def test_untrusted_variant_is_never_echoed(variant, case_id, facts):
+    result = check(case_id, variant=variant, **facts)
+    assert result.variant == "unknown"
+    assert "secret" not in repr(result) and "xxxx" not in repr(result)
+
+
+def test_untrusted_case_id_is_never_echoed():
+    from isolation_tests.host_probes import validate_host_evidence
+    result = validate_host_evidence("Bearer synthetic-secret", ev("Bearer synthetic-secret", variant="digest"))
+    assert result.case_id == "unknown" and "secret" not in repr(result)
+
+
+CGROUP = {"memory.max": "1610612736\n", "pids.max": "256\n", "cpu.max": "150000 100000\n"}
+SHM_TMP = ("overlay / overlay ro,relatime 0 0\n"
+           "tmpfs /dev/shm tmpfs rw,nosuid,nodev,noexec,relatime,size=262144k 0 0\n"
+           "tmpfs /tmp tmpfs rw,nosuid,nodev,noexec,relatime,size=262144k 0 0\n")
+
+
+def profile(monkeypatch, cgroup=CGROUP, mounts=SHM_TMP):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_read_text", lambda p: (
+        mounts if p == host_probes.PROC_MOUNTS else cgroup.get(p.name)))
+    return host_probes._resource_profile()
+
+
+def test_resource_profile_records_values_and_matches_baseline(monkeypatch):
+    facts = profile(monkeypatch)
+    assert facts == {"cpu_limit": 1.5, "memory_limit_mib": 1536, "pids_limit": 256,
+                     "shm_mib": 256, "tmpfs_mib": 256,
+                     "resource_profile_recorded": True, "resource_limits_ok": True}
+
+
+def test_resource_profile_over_baseline_is_recorded_but_not_ok(monkeypatch):
+    facts = profile(monkeypatch, cgroup={**CGROUP, "memory.max": "8589934592"})
+    assert facts["memory_limit_mib"] == 8192
+    assert facts["resource_profile_recorded"] is True and facts["resource_limits_ok"] is False
+
+
+def test_tiny_limit_does_not_masquerade_as_the_approved_profile(monkeypatch):
+    facts = profile(monkeypatch, cgroup={**CGROUP, "memory.max": "1"})
+    assert facts["memory_limit_mib"] == 0 and facts["resource_limits_ok"] is False
+
+
+def test_unlimited_value_is_recorded_as_minus_one_and_fails_limits(monkeypatch):
+    facts = profile(monkeypatch, cgroup={**CGROUP, "pids.max": "max\n", "cpu.max": "max 100000\n"})
+    assert facts["pids_limit"] == -1 and facts["cpu_limit"] == -1
+    assert facts["resource_limits_ok"] is False
+
+
+def test_profile_needs_all_five_values_to_be_recorded(monkeypatch):
+    for mounts in ("overlay / overlay ro 0 0\n", SHM_TMP.split("tmpfs /tmp")[0]):
+        facts = profile(monkeypatch, mounts=mounts)
+        assert facts["resource_profile_recorded"] is False and "resource_limits_ok" not in facts
+    facts = profile(monkeypatch, cgroup={k: v for k, v in CGROUP.items() if k != "cpu.max"})
+    assert facts["resource_profile_recorded"] is False and "cpu_limit" not in facts
+
+
+def test_declared_boundary_never_replaces_detection(monkeypatch):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_platform", lambda: "linux")
+    monkeypatch.setattr(host_probes, "_detect_boundary", lambda: "host")
+    facts = host_probes.collect_host_facts(boundary="container")
+    assert facts["boundary"] == "host" and facts["boundary_declared"] == "container"
+    result = check("HOST-02", variant="environment", environment_names_ok=True,
+                   **{k: facts[k] for k in ("boundary", "boundary_declared")})
+    assert (result.status, result.reason) == ("blocked", "boundary_mismatch")
+
+
+def test_write_probe_never_runs_on_the_host(monkeypatch):
+    from isolation_tests import host_probes
+    monkeypatch.setattr(host_probes, "_platform", lambda: "linux")
+    monkeypatch.setattr(host_probes, "_detect_boundary", lambda: "host")
+    monkeypatch.setattr(host_probes, "_write_probe", lambda: pytest.fail("host must not be written"))
+    facts = host_probes.collect_host_facts()
+    assert "readonly_ok" not in facts and facts["write_probe_applicable"] is False
+
+
+def test_single_fact_vocabulary_lives_in_evidence_module():
+    from isolation_tests import evidence, host_probes
+    assert host_probes.APPROVED_FACTS is evidence.APPROVED_FACTS
+    for name in ("uid_ok", "seccomp_ok", "unsupported_boundary", "source_allowed", "source_denied",
+                 "credentials_rotated", "old_credentials_rejected", "context_cleanup_ok",
+                 "boundary", "evidence_source", "replacement_kind", "concurrency_limit",
+                 "fixture_max_active", "cpu_limit", "memory_limit_mib", "resource_limits_ok"):
+        assert name in evidence.APPROVED_FACTS, name
+
+
+# --- final review #8: runtime-socket directories mounted into the container -------
+# Samples follow /proc/self/mountinfo as written by Docker 24 / runc on Linux 6.x.
+
+HARDENED_MOUNTINFO = (
+    "590 512 0:61 / / ro,relatime master:301 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/A:/var/lib/docker/overlay2/l/B,upperdir=/var/lib/docker/overlay2/x/diff,workdir=/var/lib/docker/overlay2/x/work\n"
+    "591 590 0:64 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n"
+    "592 590 0:65 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755,inode64\n"
+    "593 592 0:66 / /dev/pts rw,nosuid,noexec,relatime - devpts devpts rw,gid=5,mode=620,ptmxmode=666\n"
+    "594 590 0:67 / /sys ro,nosuid,nodev,noexec,relatime - sysfs sysfs ro\n"
+    "595 594 0:30 / /sys/fs/cgroup ro,nosuid,nodev,noexec,relatime - cgroup2 cgroup rw,nsdelegate\n"
+    "596 592 0:63 / /dev/mqueue rw,nosuid,nodev,noexec,relatime - mqueue mqueue rw\n"
+    "597 592 0:68 / /dev/shm rw,nosuid,nodev,noexec,relatime - tmpfs shm rw,size=262144k,inode64\n"
+    "598 590 259:2 /var/lib/docker/containers/c0ffee/resolv.conf /etc/resolv.conf rw,relatime - ext4 /dev/nvme0n1p2 rw\n"
+    "599 590 259:2 /var/lib/docker/containers/c0ffee/hostname /etc/hostname rw,relatime - ext4 /dev/nvme0n1p2 rw\n"
+    "600 590 259:2 /var/lib/docker/containers/c0ffee/hosts /etc/hosts rw,relatime - ext4 /dev/nvme0n1p2 rw\n"
+    "601 590 0:69 / /tmp rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=262144k,inode64\n"
+)
+
+
+def test_hardened_container_mountinfo_passes_mounts(monkeypatch):
+    assert linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO)["mounts_ok"] is True
+
+
+@pytest.mark.parametrize("extra", [
+    # docker run -v /var/run:/var/run (host /var/run -> /run, a tmpfs)
+    "610 590 0:25 / /var/run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=1631836k,mode=755,inode64\n",
+    # docker run -v /run:/run with the host's /run tmpfs bound under a sub path
+    "611 590 0:25 /docker /run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=1631836k,mode=755,inode64\n",
+    # the runtime directories themselves
+    "612 590 0:25 /docker /run/docker rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=755\n",
+    "613 590 0:25 /containerd /run/containerd rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=755\n",
+    "614 590 259:2 /var/lib/docker /var/lib/docker rw,relatime - ext4 /dev/nvme0n1p2 rw\n",
+    # the host root filesystem
+    "615 590 259:2 / /host ro,relatime - ext4 /dev/nvme0n1p2 rw\n",
+    "616 590 259:2 / /mnt/root ro,relatime - ext4 /dev/nvme0n1p2 rw\n",
+    # a socket bound to another name
+    "617 590 0:25 /docker.sock /run/engine rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,mode=755\n",
+    "618 590 0:25 /podman/podman.sock /var/run/podman.sock rw,nosuid,nodev - tmpfs tmpfs rw\n",
+])
+def test_bind_mounted_runtime_directories_fail_mounts(monkeypatch, extra):
+    assert linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO + extra)["mounts_ok"] is False
+
+
+@pytest.mark.parametrize("extra,socket_dir", [
+    ("620 590 0:25 / /run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=65536k\n", "/run"),
+    ("621 590 0:25 /user/1000 /srv/state rw,nosuid,nodev,relatime - tmpfs tmpfs rw\n", "/srv/state"),
+    ("", "/tmp"),
+    ("", "/run"),
+])
+def test_socket_reachable_under_any_mounted_directory_fails_mounts(monkeypatch, extra, socket_dir):
+    facts = linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO + extra, sockets=(socket_dir,))
+    assert facts["mounts_ok"] is False
+
+
+def test_fresh_run_tmpfs_without_sockets_passes(monkeypatch):
+    extra = "620 590 0:70 / /run rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=65536k,inode64\n"
+    assert linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO + extra)["mounts_ok"] is True
+
+
+def test_incomplete_socket_scan_omits_mounts(monkeypatch):
+    from isolation_tests import host_probes
+    facts = linux(monkeypatch, mountinfo=HARDENED_MOUNTINFO)
+    monkeypatch.setattr(host_probes, "_socket_under", lambda path: None if path == "/tmp" else False)
+    facts = host_probes.collect_host_facts()
+    assert "mounts_ok" not in facts
+
+
+def test_writable_root_in_mountinfo_fails_mounts(monkeypatch):
+    info = HARDENED_MOUNTINFO.replace("/ / ro,relatime", "/ / rw,relatime", 1)
+    assert linux(monkeypatch, mountinfo=info)["mounts_ok"] is False
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo") or os.name == "nt", reason="needs POSIX sockets")
+def test_socket_scan_finds_a_unix_socket_and_ignores_plain_files(tmp_path):
+    import socket
+    from isolation_tests import host_probes
+    (tmp_path / "plain").write_text("x")
+    assert host_probes._socket_under(str(tmp_path)) is False
+    nested = tmp_path / "containerd"
+    nested.mkdir()
+    server = socket.socket(socket.AF_UNIX)
+    try:
+        server.bind(str(nested / "containerd.sock"))
+        assert host_probes._socket_under(str(tmp_path)) is True
+    finally:
+        server.close()
+
+
+def test_socket_scan_of_missing_path_is_false_and_budget_overflow_is_incomplete(tmp_path, monkeypatch):
+    from isolation_tests import host_probes
+    assert host_probes._socket_under(str(tmp_path / "absent")) is False
+    for index in range(5):
+        (tmp_path / f"f{index}").write_text("x")
+    monkeypatch.setattr(host_probes, "MAX_SCAN_ENTRIES", 3)
+    assert host_probes._socket_under(str(tmp_path)) is None

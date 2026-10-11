@@ -1,0 +1,11 @@
+{
+  "submit_url": null,
+  "utterance_path": ["userRequest", "utterance"],
+  "initial_callback_flag_path": ["useCallback"],
+  "job_id_path": null,
+  "result_url_template": null,
+  "result_evidence_path": null,
+  "auth_env": null,
+  "max_initial_s": 5,
+  "max_result_s": 60
+}

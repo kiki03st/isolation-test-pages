@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>저장소 표본 기록</title></head><body><main><p>합성 값을 저장합니다.</p><script>
+(async () => {
+  const value = 'isolation-test';
+  document.cookie = 'isolation_test=' + value + '; SameSite=Lax';
+  localStorage.setItem('isolation_test', value);
+  await new Promise((resolve, reject) => {
+    const open = indexedDB.open('isolation-test-db', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('seed');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('seed', 'readwrite');
+      tx.objectStore('seed').put(value, 'seed');
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  });
+  const ready = document.createElement('p');
+  ready.dataset.test = 'seed-ready';
+  ready.textContent = 'seed-ready';
+  document.querySelector('main').append(ready);
+})();
+</script>
+<p>합성 테스트 자료입니다.</p></main></body></html>
