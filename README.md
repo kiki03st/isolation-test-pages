@@ -47,7 +47,7 @@ isolation-tests host-probe --output host-probe.json --run-id <host_batch> --boun
 
 ## 게시 순서
 
-아직 게시하지 않았습니다. 게시 주소는 게시가 실제로 끝난 뒤에 이 문서에 적습니다.
+게시 주소: https://kiki03st.github.io/isolation-test-pages/ (2026-10-11 게시, GitHub Actions 배포)
 `<login>`은 승인된 개인 GitHub 로그인, `<noreply-email>`은 그 계정의 noreply 주소이며,
 아래는 `docs/runbook.md` 7절과 같은 순서입니다. 가드는 값을 출력하지 않고 통과/거부만 출력합니다.
 
