@@ -6,7 +6,7 @@
 | 상태 | 값 | 근거 |
 | --- | --- | --- |
 | tool_ready | ready | 아래 "도구 검증" 1~2 결과. 로컬 계약 시험과 미설정 실행기 동작이 기대와 일치 |
-| pages_published | not_run | 사유: 게시 승인 대기 중(awaiting user approval for publication). 배포 URL 없음 |
+| pages_published | published | 2026-10-11 runbook 7절 순서로 게시. 저장소 가드 통과, Pages 배포 성공, 산출물 전체 파일 응답 확인. 주소는 README |
 | environment_verified | blocked | 실제 수집기·표본 호스트·증거가 없어 시험하지 못함. 아래 "필요한 외부 입력" |
 
 ## 로컬 계약 시험과 실제 시험의 차이
@@ -62,6 +62,4 @@ LIM-04의 bytes, elements, text, depth 경계는 passed다. 위 항목은 도구
 
 ## 남은 순서
 
-1. 게시 승인 후 runbook 7절 순서: noreply·이력·산출물 가드, 원격 생성(push 없음), Pages 활성화(첫 push 전),
-   PERSONAL_OWNER 변수 설정, 저장소 가드, push, 배포 URL 확인 (pages_published)
-2. 위 입력을 갖춘 뒤 그룹별 실행과 최종 `run --all` (environment_verified)
+1. 위 입력을 갖춘 뒤 그룹별 실행과 최종 `run --all` (environment_verified)
